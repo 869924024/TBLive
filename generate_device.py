@@ -1,3 +1,4 @@
+from loguru import logger
 import time
 import threading
 from SunnyNet.Event import HTTPEvent
@@ -5,7 +6,6 @@ from SunnyNet.SunnyNet import SunnyNet as Sunny
 import psutil
 import os
 import subprocess
-from mumu.mumu import Mumu
 import socket
 
 
@@ -146,12 +146,12 @@ def manage_file_line(filename, check_string, write_string):
         return ""
     """
     管理文件内容：自动创建文件或追加内容，确保无空行
-    
+
     参数:
         filename: 文件名
         check_string: 判断字符串，用于检查是否已存在
         write_string: 写入行字符串，不存在时追加
-    
+
     返回:
         str: 'exists' 表示内容已存在，'added' 表示已追加内容，'created' 表示已创建新文件
     """
@@ -213,6 +213,7 @@ class SunnyNetService:
                 sgext = unquote(headers_dict['x-sgext'])
                 str_data = f"{devid}\t{miniwua}\t{sgext}\t{umt}\t{utdid}"
                 if "null" not in str_data and umt != utdid and devid != "" and miniwua != "" and umt != "" and utdid != "" and sgext != "":
+                    logger.info("捕获到设备信息: " + str_data)
                     manage_file_line("设备.txt", headers_dict.get("x-devid", ""), str_data)
                     self.is_captured = True
                     self.deviceInfo = str_data
@@ -230,11 +231,13 @@ class SunnyNetService:
 
             if not self.app.start():
                 self.error_message = f"启动失败: {self.app.error()}"
+                logger.error(self.error_message)
                 self.running = False
                 return
 
             if not self.app.open_drive(False):
                 self.error_message = "驱动加载失败，需要管理员权限"
+                logger.error(self.error_message)
                 self.running = False
                 return
 
@@ -318,20 +321,39 @@ class Gen:
         self.index = -1
         self.end = False
         self.running = False
+        self._mumu_module = None
         kill_processes_by_keyword("MuMu", True)
+    
+    def _get_mumu(self):
+        """延迟导入 MuMu 模块"""
+        if self._mumu_module is None:
+            try:
+                from mumu.mumu import Mumu
+                self._mumu_module = Mumu
+            except Exception as e:
+                print(f"导入 MuMu 模块失败: {e}")
+                return None
+        return self._mumu_module
 
     def create_emulator(self):
         """完整的任务流程"""
-        mm = Mumu()
+        Mumu = self._get_mumu()
+        if Mumu is None:
+            return False, "MuMu 模块导入失败"
+        
+        try:
+            mm = Mumu()
 
-        # 创建模拟器
-        index = mm.core.create(1)
-        if len(index) < 1:
-            return False, "模拟器创建失败"
-        self.index = index[0]
-        print("设备：" + str(self.index))
-        mumu = Mumu().select(self.index)
-        return True, mumu
+            # 创建模拟器
+            index = mm.core.create(1)
+            if len(index) < 1:
+                return False, "模拟器创建失败"
+            self.index = index[0]
+            print("设备：" + str(self.index))
+            mumu = Mumu().select(self.index)
+            return True, mumu
+        except Exception as e:
+            return False, f"创建模拟器时出错: {e}"
 
     def start_emulator(self, mm):
         # 设置分辨率
@@ -346,46 +368,81 @@ class Gen:
             try:
                 info = mm.info.get_info()
                 if info["player_state"] == "start_finished":
+                    print(f"模拟器启动完成 (耗时: {i+1}秒)")
                     flag = True
+                    break
             except Exception as e:
                 pass
             time.sleep(1)
-            if flag:
-                break
+            
+        if not flag:
+            print("模拟器启动超时")
+            
         return flag
 
     def install_app(self, mm):
-        mm.app.install(os.path.abspath(r'source/tm13.12.2.apk'))
+        apk_path = os.path.abspath(r'source/tm13.12.2.apk')
+        print(f"尝试安装 APK: {apk_path}")
+        
+        if not os.path.exists(apk_path):
+            print(f"APK 文件不存在: {apk_path}")
+            return False
+            
+        try:
+            mm.app.install(apk_path)
+            print("APK 安装命令已执行")
+        except Exception as e:
+            print(f"APK 安装失败: {e}")
+            return False
+            
         flag = False
-        for i in range(20):
+        for i in range(30):  # 增加等待时间到 30 秒
             if self.end:
                 break
             try:
                 info = mm.app.get_installed()
-                if {'package': 'com.tmall.wireless', 'app_name': '手机天猫', 'version': '13.12.2'} in info:
-                    flag = True
+                print(f"检查安装状态 ({i+1}/30): 找到 {len(info)} 个应用")
+                
+                # 检查是否包含天猫应用
+                for app in info:
+                    if app.get('package') == 'com.tmall.wireless':
+                        print(f"找到天猫应用: {app}")
+                        flag = True
+                        break
+                        
             except Exception as e:
-                pass
+                print(f"检查安装状态时出错: {e}")
             time.sleep(1)
             if flag:
                 break
+                
+        if flag:
+            print("应用安装成功！")
+        else:
+            print("应用安装超时或失败")
+            
         return flag
 
     def launch_app(self, mm):
+        print("启动天猫应用...")
         mm.app.launch('com.tmall.wireless')
         flag = False
-        for i in range(20):
+        for i in range(30):  # 增加等待时间，低配置启动应用可能较慢
             if self.end:
                 break
             try:
                 info = mm.app.state('com.tmall.wireless')
                 if info == "running":
+                    print(f"应用启动成功 (耗时: {i+1}秒)")
                     flag = True
+                    break
             except Exception as e:
                 pass
             time.sleep(1)
-            if flag:
-                break
+            
+        if not flag:
+            print("应用启动超时")
+            
         return flag
 
     def stop_capture(self, service: SunnyNetService):
@@ -418,10 +475,12 @@ class Gen:
             print(str(e))
             pass
         try:
-            m2 = Mumu().all()
-            m2.power.shutdown()
-            m2.power.stop()
-            m2.core.delete()
+            Mumu = self._get_mumu()
+            if Mumu is not None:
+                m2 = Mumu().all()
+                m2.power.shutdown()
+                m2.power.stop()
+                m2.core.delete()
             kill_processes_by_keyword("MuMu", True)
         except Exception as e:
             import traceback
@@ -430,6 +489,14 @@ class Gen:
             pass
 
     def task(self):
+        # 如果 service 未初始化（独立调用），则先初始化
+        if not hasattr(self, 'service') or self.service is None:
+            kill_process_by_port(2025)
+            self.service = SunnyNetService(port=2025)
+            if not self.service.start():
+                return False, "SunnyNet服务启动失败"
+            time.sleep(2)  # 等待服务完全启动
+
         self.service.is_captured = False
         success, mm = self.create_emulator()
         if not success:
@@ -492,4 +559,21 @@ class Gen:
 
 
 if __name__ == '__main__':
-    print(Gen().task())
+    gen = Gen()
+    try:
+        result = gen.task()
+        print(f"✅ 任务完成: {result}")
+    except KeyboardInterrupt:
+        print("\n⚠️ 用户中断任务")
+    except Exception as e:
+        import traceback
+
+        print(f"❌ 任务执行出错: {e}")
+        traceback.print_exc()
+    finally:
+        # 清理资源
+        if hasattr(gen, 'service') and gen.service:
+            gen.service.stop()
+            print("🛑 SunnyNet服务已停止")
+        kill_processes_by_keyword("MuMu", True)
+        print("🧹 清理完成")

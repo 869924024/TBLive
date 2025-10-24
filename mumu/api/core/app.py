@@ -29,6 +29,12 @@ class App:
         self.utils.set_operate('control')
 
         ret_code, retval = self.utils.run_command(['app', 'install', '-apk', apk_path])
+        
+        print(f"安装命令返回码: {ret_code}")
+        print(f"安装命令输出: {retval}")
+        
+        if ret_code != 0:
+            raise RuntimeError(f"应用安装失败: {retval}")
 
         return True
 
@@ -80,20 +86,26 @@ class App:
         ret_code, retval = self.utils.run_command(['app', 'info','-i'])
 
         if ret_code != 0:
+            print(f"获取已安装应用失败，返回码: {ret_code}, 输出: {retval}")
             raise RuntimeError(retval)
 
-        data = json.loads(retval)
-        installed = []
+        try:
+            data = json.loads(retval)
+            installed = []
 
-        for key in data.keys():
-            if key != "active":
-                installed.append({
-                    "package": key,
-                    "app_name": data[key]['app_name'],
-                    "version": data[key]['version']
-                })
+            for key in data.keys():
+                if key != "active":
+                    installed.append({
+                        "package": key,
+                        "app_name": data[key].get('app_name', 'Unknown'),
+                        "version": data[key].get('version', 'Unknown')
+                    })
 
-        return installed
+            return installed
+        except json.JSONDecodeError as e:
+            print(f"解析应用列表 JSON 失败: {e}")
+            print(f"原始输出: {retval}")
+            raise RuntimeError(f"解析应用列表失败: {e}")
 
 
     def exists(self,package: str) -> bool:

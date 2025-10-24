@@ -28,7 +28,7 @@ from mumu.utils import utils
 
 
 class Mumu:
-    __mumu_manager = r"C:\Program Files\Netease\MuMu\nx_main\MuMuManager.exe"
+    __mumu_manager = r"D:\MuMuPlayer\nx_main\MuMuManager.exe"
 
     if not os.path.exists(__mumu_manager):
         __mumu_manager = r"D:\Program Files\Netease\MuMu\nx_main\MuMuManager.exe"

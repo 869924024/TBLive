@@ -11,7 +11,7 @@ from qfluentwidgets import (
     PushButton, PrimaryPushButton, TransparentPushButton,
     BodyLabel, TitleLabel, SubtitleLabel, CaptionLabel,
     ListWidget, TextEdit, LineEdit, ComboBox, RadioButton,
-    CardWidget, GroupHeaderCardWidget,
+    CardWidget,
     InfoBar, InfoBarPosition,
     FluentIcon as FIF,
     isDarkTheme
