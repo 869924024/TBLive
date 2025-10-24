@@ -72,6 +72,8 @@ def kill_processes_by_keyword(keyword, force=False):
     killed_count = 0
     found_processes = []
 
+    print(f"正在搜索包含关键词 '{keyword}' 的进程...")
+
     # 查找匹配的进程
     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
@@ -97,15 +99,12 @@ def kill_processes_by_keyword(keyword, force=False):
         print(f"未找到包含关键词 '{keyword}' 的进程")
         return 0
 
-    print(f"找到 {len(found_processes)} 个匹配的进程:\n")
+    print(f"找到 {len(found_processes)} 个匹配的进程:")
     for proc in found_processes:
-        print(f"PID: {proc['pid']}")
-        print(f"名称: {proc['name']}")
-        print(f"命令: {proc['cmdline']}")
-        print("-" * 80)
+        print(f"  - PID: {proc['pid']}, 名称: {proc['name']}")
 
     # 终止进程
-    print("\n开始终止进程...")
+    print(f"\n开始终止进程 (强制模式: {'是' if force else '否'})...")
     for proc_info in found_processes:
         try:
             proc = psutil.Process(proc_info['pid'])
@@ -118,6 +117,20 @@ def kill_processes_by_keyword(keyword, force=False):
                 print(f"✓ 已终止进程 {proc_info['pid']} ({proc_info['name']})")
 
             killed_count += 1
+            
+            # 等待进程完全终止
+            try:
+                proc.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                if force:
+                    print(f"⚠ 进程 {proc_info['pid']} 强制终止后仍在运行")
+                else:
+                    # 如果正常终止失败，尝试强制终止
+                    try:
+                        proc.kill()
+                        print(f"✓ 已强制终止进程 {proc_info['pid']} ({proc_info['name']})")
+                    except:
+                        pass
 
         except psutil.NoSuchProcess:
             print(f"✗ 进程 {proc_info['pid']} 已不存在")
@@ -126,6 +139,7 @@ def kill_processes_by_keyword(keyword, force=False):
         except Exception as e:
             print(f"✗ 终止进程 {proc_info['pid']} 时出错: {e}")
 
+    print(f"总共终止了 {killed_count} 个进程")
     return killed_count
 
 
@@ -462,31 +476,82 @@ class Gen:
         return flag
 
     def shutdown_del(self, mm):
+        """完全清理模拟器"""
+        print("开始清理模拟器...")
+        
         try:
-            mm.power.shutdown()
-            mm.power.stop()
-            mm.info.info_all()
+            # 第一步：关闭模拟器
+            print("1. 关闭模拟器...")
+            try:
+                mm.power.shutdown()
+                print("✓ 模拟器已关闭")
+            except Exception as e:
+                print(f"关闭模拟器时出错: {e}")
+            
+            # 等待模拟器完全关闭
+            print("2. 等待模拟器完全关闭...")
+            time.sleep(5)
+            
+            # 第二步：停止模拟器进程
+            print("3. 停止模拟器进程...")
+            try:
+                mm.power.stop()
+                print("✓ 模拟器进程已停止")
+            except Exception as e:
+                print(f"停止模拟器进程时出错: {e}")
+            
+            # 等待进程完全停止
             time.sleep(3)
-            mm.core.delete()
-            kill_processes_by_keyword("MuMu", True)
+            
+            # 第三步：删除模拟器
+            print("4. 删除模拟器...")
+            try:
+                mm.core.delete()
+                print("✓ 模拟器已删除")
+            except Exception as e:
+                print(f"删除模拟器时出错: {e}")
+            
+            # 等待删除完成
+            time.sleep(3)
+            
         except Exception as e:
+            print(f"清理过程中出错: {e}")
             import traceback
             traceback.print_exc()
-            print(str(e))
-            pass
+        
+        # 第四步：强制清理所有 MuMu 相关进程
+        print("5. 强制清理所有 MuMu 进程...")
+        try:
+            kill_processes_by_keyword("MuMu", True)
+            print("✓ 所有 MuMu 进程已清理")
+        except Exception as e:
+            print(f"清理进程时出错: {e}")
+        
+        # 第五步：额外清理（如果还有残留）
+        print("6. 额外清理...")
         try:
             Mumu = self._get_mumu()
             if Mumu is not None:
                 m2 = Mumu().all()
-                m2.power.shutdown()
-                m2.power.stop()
-                m2.core.delete()
-            kill_processes_by_keyword("MuMu", True)
+                try:
+                    m2.power.shutdown()
+                    m2.power.stop()
+                    m2.core.delete()
+                    print("✓ 额外清理完成")
+                except Exception as e:
+                    print(f"额外清理时出错: {e}")
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            print(str(e))
-            pass
+            print(f"获取 MuMu 实例时出错: {e}")
+        
+        # 最后再次清理进程
+        print("7. 最终清理...")
+        try:
+            kill_processes_by_keyword("MuMu", True)
+            print("✓ 最终清理完成")
+        except Exception as e:
+            print(f"最终清理时出错: {e}")
+        
+        print("模拟器清理完成！")
 
     def task(self):
         # 如果 service 未初始化（独立调用），则先初始化
