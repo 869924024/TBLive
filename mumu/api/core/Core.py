@@ -79,6 +79,21 @@ class Core:
 
         raise RuntimeError(retval)
 
+    def delete_all(self) -> bool:
+        """
+            删除所有模拟器
+        :return:
+        """
+        self.utils.set_operate("delete")
+        self.utils.set_vm_index("all")
+
+        ret_code, retval = self.utils.run_command([])
+
+        if ret_code == 0:
+            return True
+
+        raise RuntimeError(retval)
+
     def rename(self, name: str) -> bool:
         """
             重命名模拟器

@@ -155,11 +155,15 @@ def get_free_port():
 TARGET_HEADERS = ["x-umt", "x-sgext", "x-mini-wua", "x-ttid", "x-utdid", "x-devid"]
 
 
+# 全局文件锁，用于多线程写入文件时的同步
+_global_file_lock = threading.Lock()
+
 def manage_file_line(filename, check_string, write_string):
     if check_string == "":
         return ""
     """
     管理文件内容：自动创建文件或追加内容，确保无空行
+    线程安全版本
 
     参数:
         filename: 文件名
@@ -171,33 +175,34 @@ def manage_file_line(filename, check_string, write_string):
     """
     import os
 
-    # 如果文件不存在，创建新文件并写入
-    if not os.path.exists(filename):
-        with open(filename, 'w', encoding='utf-8') as f:
-            f.write(write_string)
-        return 'created'
+    with _global_file_lock:  # 使用锁保护文件操作
+        # 如果文件不存在，创建新文件并写入
+        if not os.path.exists(filename):
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(write_string)
+            return 'created'
 
-    # 文件存在，读取内容
-    with open(filename, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
+        # 文件存在，读取内容
+        with open(filename, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
 
-    # 移除所有空行和每行末尾的空白字符
-    lines = [line.rstrip() for line in lines if line.strip()]
+        # 移除所有空行和每行末尾的空白字符
+        lines = [line.rstrip() for line in lines if line.strip()]
 
-    # 检查判断字符串是否存在于任何一行中
-    for line in lines:
-        if check_string in line:
-            return 'exists'
-
-    # 判断字符串不存在，追加写入
-    with open(filename, 'w', encoding='utf-8') as f:
-        # 写入所有现有行（已去除空行）
+        # 检查判断字符串是否存在于任何一行中
         for line in lines:
-            f.write(line + '\n')
-        # 追加新行
-        f.write(write_string)
+            if check_string in line:
+                return 'exists'
 
-    return 'added'
+        # 判断字符串不存在，追加写入
+        with open(filename, 'w', encoding='utf-8') as f:
+            # 写入所有现有行（已去除空行）
+            for line in lines:
+                f.write(line + '\n')
+            # 追加新行
+            f.write(write_string)
+
+        return 'added'
 
 
 from urllib.parse import unquote
@@ -213,6 +218,8 @@ class SunnyNetService:
         self.error_message = None  # 存储错误信息
         self.pid = pid
         self.is_captured = False
+        self.deviceInfo_by_pid = {}  # 改为字典：{pid: deviceInfo}
+        self.deviceInfo_lock = threading.Lock()  # 保护字典的锁
 
     def http_callback(self, conn: HTTPEvent):
         headers = conn.get_request().get_headers()
@@ -227,10 +234,14 @@ class SunnyNetService:
                 sgext = unquote(headers_dict['x-sgext'])
                 str_data = f"{devid}\t{miniwua}\t{sgext}\t{umt}\t{utdid}"
                 if "null" not in str_data and umt != utdid and devid != "" and miniwua != "" and umt != "" and utdid != "" and sgext != "":
-                    logger.info("捕获到设备信息: " + str_data)
+                    # 获取请求的PID
+                    request_pid = conn.get_pid()
+                    logger.info(f"捕获到设备信息 (PID: {request_pid}): {str_data}")
                     manage_file_line("设备.txt", headers_dict.get("x-devid", ""), str_data)
                     self.is_captured = True
-                    self.deviceInfo = str_data
+                    # 根据PID存储deviceInfo
+                    with self.deviceInfo_lock:
+                        self.deviceInfo_by_pid[request_pid] = str_data
             except Exception as e:
                 pass
 
@@ -336,7 +347,27 @@ class Gen:
         self.end = False
         self.running = False
         self._mumu_module = None
-        kill_processes_by_keyword("MuMu", True)
+        self.service = None  # 单个 SunnyNet 服务
+        self.total_devices = 0  # 总设备数
+        self.target_count = 0  # 目标设备数
+        self.success_count = 0  # 成功生成的设备数
+        self.window_count = 1  # 并发窗口数
+        self.file_lock = threading.Lock()  # 文件写入锁
+        self.create_lock = threading.Lock()  # 创建模拟器的锁，避免同时创建
+        self.delete_lock = threading.Lock()  # 删除模拟器的锁，避免同时删除
+        self.capture_lock = threading.Lock()  # 抓包锁，保护PID添加/移除和数据读取
+        self.start_time = None  # 任务开始时间
+        self.log_callback = None  # 日志回调函数
+        # 注意：不在这里kill进程，因为任务会正常创建-使用-删除模拟器
+    
+    def _log(self, message):
+        """统一日志输出"""
+        print(message)  # 打印到控制台
+        if self.log_callback:
+            try:
+                self.log_callback(message)  # 输出到UI
+            except:
+                pass
     
     def _get_mumu(self):
         """延迟导入 MuMu 模块"""
@@ -345,12 +376,29 @@ class Gen:
                 from mumu.mumu import Mumu
                 self._mumu_module = Mumu
             except Exception as e:
-                print(f"导入 MuMu 模块失败: {e}")
+                self._log(f"导入 MuMu 模块失败: {e}")
                 return None
         return self._mumu_module
+    
+    def get_progress_info(self):
+        """获取当前进度信息"""
+        elapsed_time = 0
+        if self.start_time:
+            elapsed_time = int(time.time() - self.start_time)
+        
+        return {
+            'success_count': self.success_count,
+            'target_count': self.target_count,
+            'elapsed_time': elapsed_time,
+            'running': self.running
+        }
+    
+    def set_log_callback(self, callback):
+        """设置日志回调函数"""
+        self.log_callback = callback
 
-    def create_emulator(self):
-        """完整的任务流程"""
+    def create_emulator_internal(self):
+        """内部创建模拟器方法 - 调用者需要持有锁"""
         Mumu = self._get_mumu()
         if Mumu is None:
             return False, "MuMu 模块导入失败"
@@ -362,18 +410,22 @@ class Gen:
             index = mm.core.create(1)
             if len(index) < 1:
                 return False, "模拟器创建失败"
-            self.index = index[0]
-            print("设备：" + str(self.index))
-            mumu = Mumu().select(self.index)
+            emulator_index = index[0]
+            print(f"✅ 创建模拟器成功，索引: {emulator_index}")
+            
+            # 选择模拟器
+            mumu = Mumu().select(emulator_index)
             return True, mumu
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return False, f"创建模拟器时出错: {e}"
 
     def start_emulator(self, mm):
-        # 设置分辨率
+        # 设置分辨率（最小配置，节省资源）
         mm.screen.resolution_mobile()
-        mm.screen.resolution(900, 1600)
-        mm.screen.dpi(320)
+        mm.screen.resolution(360, 640)
+        mm.screen.dpi(120)
         mm.power.start()
         flag = False
         for i in range(20):
@@ -476,117 +528,463 @@ class Gen:
         return flag
 
     def shutdown_del(self, mm):
-        """完全清理模拟器"""
-        print("开始清理模拟器...")
-        
+        """完全清理单个模拟器 - 增强版，确保删除成功"""
         try:
             # 第一步：关闭模拟器
-            print("1. 关闭模拟器...")
-            try:
-                mm.power.shutdown()
-                print("✓ 模拟器已关闭")
-            except Exception as e:
-                print(f"关闭模拟器时出错: {e}")
+            for retry in range(3):  # 增加重试次数
+                try:
+                    mm.power.shutdown()
+                    print("✓ 模拟器已关闭")
+                    break
+                except Exception as e:
+                    if retry == 2:
+                        print(f"⚠️ 关闭模拟器失败: {e}")
+                    else:
+                        time.sleep(1.0)  # 增加重试等待时间
             
-            # 等待模拟器完全关闭
-            print("2. 等待模拟器完全关闭...")
-            time.sleep(5)
+            # 增加等待时间，确保进程完全停止
+            time.sleep(2.5)
             
             # 第二步：停止模拟器进程
-            print("3. 停止模拟器进程...")
-            try:
-                mm.power.stop()
-                print("✓ 模拟器进程已停止")
-            except Exception as e:
-                print(f"停止模拟器进程时出错: {e}")
+            for retry in range(3):  # 增加重试次数
+                try:
+                    mm.power.stop()
+                    print("✓ 模拟器进程已停止")
+                    break
+                except Exception as e:
+                    if retry == 2:
+                        print(f"⚠️ 停止模拟器进程失败: {e}")
+                    else:
+                        time.sleep(1.0)  # 增加重试等待时间
             
-            # 等待进程完全停止
-            time.sleep(3)
+            # 增加等待时间，确保进程完全停止
+            time.sleep(2.5)
             
-            # 第三步：删除模拟器
-            print("4. 删除模拟器...")
-            try:
-                mm.core.delete()
-                print("✓ 模拟器已删除")
-            except Exception as e:
-                print(f"删除模拟器时出错: {e}")
+            # 第三步：删除模拟器（使用锁保护，避免同时删除）
+            with self.delete_lock:
+                delete_success = False
+                for retry in range(5):  # 增加重试次数到5次
+                    try:
+                        mm.core.delete()
+                        print("✓ 模拟器已删除")
+                        delete_success = True
+                        break
+                    except Exception as e:
+                        if retry == 4:
+                            print(f"⚠️ 删除模拟器失败(已重试5次): {e}")
+                            print("🔧 尝试强制清理进程...")
+                            # 强制终止所有MuMu进程
+                            try:
+                                kill_processes_by_keyword("MuMuPlayer", force=True)
+                                time.sleep(2)
+                                # 再次尝试删除
+                                try:
+                                    mm.core.delete()
+                                    print("✓ 强制清理后删除成功")
+                                    delete_success = True
+                                except:
+                                    print("❌ 强制清理后仍然无法删除，跳过")
+                            except Exception as force_e:
+                                print(f"❌ 强制清理失败: {force_e}")
+                        else:
+                            print(f"⚠️ 删除失败，第{retry+1}次重试，等待1.5秒...")
+                            time.sleep(1.5)  # 增加等待时间
+                
+                # 等待删除操作完成
+                time.sleep(0.5)
             
-            # 等待删除完成
-            time.sleep(3)
+            if delete_success:
+                print("✅ 单个模拟器清理完成")
+            else:
+                print("⚠️ 单个模拟器清理未完全成功，可能有残留")
             
         except Exception as e:
-            print(f"清理过程中出错: {e}")
+            print(f"❌ 清理模拟器过程中出错: {e}")
             import traceback
             traceback.print_exc()
-        
-        # 第四步：强制清理所有 MuMu 相关进程
-        print("5. 强制清理所有 MuMu 进程...")
-        try:
-            kill_processes_by_keyword("MuMu", True)
-            print("✓ 所有 MuMu 进程已清理")
-        except Exception as e:
-            print(f"清理进程时出错: {e}")
-        
-        # 第五步：额外清理（如果还有残留）
-        print("6. 额外清理...")
-        try:
-            Mumu = self._get_mumu()
-            if Mumu is not None:
-                m2 = Mumu().all()
-                try:
-                    m2.power.shutdown()
-                    m2.power.stop()
-                    m2.core.delete()
-                    print("✓ 额外清理完成")
-                except Exception as e:
-                    print(f"额外清理时出错: {e}")
-        except Exception as e:
-            print(f"获取 MuMu 实例时出错: {e}")
-        
-        # 最后再次清理进程
-        print("7. 最终清理...")
-        try:
-            kill_processes_by_keyword("MuMu", True)
-            print("✓ 最终清理完成")
-        except Exception as e:
-            print(f"最终清理时出错: {e}")
-        
-        print("模拟器清理完成！")
 
-    def task(self):
-        # 如果 service 未初始化（独立调用），则先初始化
-        if not hasattr(self, 'service') or self.service is None:
-            kill_process_by_port(2025)
-            self.service = SunnyNetService(port=2025)
-            if not self.service.start():
-                return False, "SunnyNet服务启动失败"
-            time.sleep(2)  # 等待服务完全启动
-
-        self.service.is_captured = False
-        success, mm = self.create_emulator()
-        if not success:
-            return success, mm
-
-        if not self.start_emulator(mm):
+    def task(self, worker_id=None):
+        """
+        执行单个设备生成任务
+        """
+        # 使用共享的SunnyNet服务
+        service = self.service
+        if not service or not service.running:
+            return False, "SunnyNet服务未启动"
+        
+        # 使用锁保护创建和设置分辨率操作
+        if worker_id:
+            self._log(f"🔒 [窗口{worker_id}] 等待创建模拟器...")
+        with self.create_lock:
+            if worker_id:
+                self._log(f"✓ [窗口{worker_id}] 开始创建模拟器")
+            success, mm = self.create_emulator_internal()
+            if not success:
+                return success, mm
+            
+            # 在锁内完成分辨率设置（最小配置，节省资源）
+            mm.screen.resolution_mobile()
+            mm.screen.resolution(360, 640)
+            mm.screen.dpi(120)
+            log_prefix = f"[窗口{worker_id}]" if worker_id else ""
+            self._log(f"✓ {log_prefix} 分辨率设置完成 (360x640, DPI:120)")
+            
+            # 创建完成后间隔一下，避免创建过快导致问题
+            time.sleep(2.0)  # 增加延迟，确保系统稳定
+        
+        # 记录启动前的进程PID
+        pids_before = set()
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                if proc.info['name'] in ['MuMuNxDevice.exe', 'MuMuVMMHeadless.exe']:
+                    pids_before.add(proc.info['pid'])
+            except:
+                pass
+        
+        # 锁释放后，启动模拟器（可以并行）
+        log_prefix = f"[窗口{worker_id}]" if worker_id else ""
+        self._log(f"🚀 {log_prefix} 正在启动模拟器...")
+        
+        # 启动前稍作延迟，避免系统资源冲突
+        time.sleep(1.0)
+        mm.power.start()
+        flag = False
+        for i in range(25):  # 缩短到25秒超时
+            if self.end:
+                break
+            try:
+                info = mm.info.get_info()
+                state = info.get("player_state", "unknown")
+                
+                # 每5秒输出一次状态
+                if i % 5 == 0 and i > 0:
+                    self._log(f"  {log_prefix} [启动中] 状态: {state}, 已等待: {i}秒")
+                
+                if state == "start_finished":
+                    self._log(f"✅ {log_prefix} 模拟器启动完成 (耗时: {i+1}秒)")
+                    flag = True
+                    break
+                elif state == "wait":
+                    self._log(f"⚠️ {log_prefix} 模拟器进入等待状态 ({i}秒)")
+            except Exception as e:
+                if i % 10 == 0:
+                    self._log(f"  检查状态异常: {e}")
+            time.sleep(1)
+            
+        if not flag:
+            self._log(f"❌ {log_prefix} 模拟器启动超时(25秒)")
             self.shutdown_del(mm)
-            return False, "模拟器启动失败"
-        time.sleep(1.5)
+            return False, "模拟器启动超时"
+        
+        time.sleep(1.0)
+        
+        # 安装APP
+        self._log(f"📦 {log_prefix} 正在安装APP...")
         if not self.install_app(mm):
             self.shutdown_del(mm)
             return False, "APP安装失败"
+        self._log(f"✓ {log_prefix} APP安装完成")
 
+        # 获取新启动的模拟器进程PID（启动后 - 启动前）
+        self._log(f"🔍 {log_prefix} 正在获取模拟器进程PID...")
+        pids_after = set()
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                if proc.info['name'] in ['MuMuNxDevice.exe', 'MuMuVMMHeadless.exe']:
+                    pids_after.add(proc.info['pid'])
+            except:
+                pass
+        
+        # 新增的PID就是当前模拟器的PID
+        emulator_pids = list(pids_after - pids_before)
+        
+        if not emulator_pids:
+            self._log(f"⚠️ {log_prefix} 未找到新增PID，将监听所有MuMu进程")
+            emulator_pids = list(pids_after)  # fallback: 使用所有PID
+        else:
+            self._log(f"✓ {log_prefix} 找到新增 PID: {emulator_pids}")
+        
+        # 启动APP
+        self._log(f"▶️ {log_prefix} 正在启动APP...")
         if not self.launch_app(mm):
+            self._log(f"❌ {log_prefix} APP启动失败")
             self.shutdown_del(mm)
             return False, "APP运行失败"
-        # 秒启动时间
-        for i in range(10):
-            mm.adb.click(440, 1142)
-            if self.service.is_captured:
+        
+        # 添加当前模拟器进程到监听列表
+        self._log(f"📡 {log_prefix} 添加PID监听: {emulator_pids}")
+        for pid in emulator_pids:
+            service.app.process_add_pid(pid)
+        
+        time.sleep(0.5)  # 等待PID监听生效
+        
+        # 清空该PID的旧数据
+        with service.deviceInfo_lock:
+            for pid in emulator_pids:
+                service.deviceInfo_by_pid.pop(pid, None)
+        
+        # 等待抓包
+        self._log(f"📶 {log_prefix} 开始抓包 (监听PID: {emulator_pids})...")
+        captured_device_info = None
+        
+        for i in range(30):  # 30
+            if self.end:  # 检查是否被停止
                 break
+            
+            # 点击界面
+            mm.adb.click(176, 458)
+            
+            # 每3秒输出一次点击日志
+            if i == 0 or i % 3 == 0:
+                self._log(f"  👆 {log_prefix} 点击界面触发请求 (第{i+1}次, 坐标:176,458)")
+            
             time.sleep(1)
+            
+            # 检查是否有任何一个PID对应的数据被捕获
+            with service.deviceInfo_lock:
+                for pid in emulator_pids:
+                    if pid in service.deviceInfo_by_pid:
+                        captured_device_info = service.deviceInfo_by_pid[pid]
+                        # 删除已使用的数据
+                        del service.deviceInfo_by_pid[pid]
+                        self._log(f"✅ {log_prefix} 抓包成功！(PID: {pid}, 耗时: {i+1}秒)")
+                        break
+            
+            if captured_device_info:
+                break
+            
+            # 每5秒输出一次进度
+            if i > 0 and i % 5 == 0:
+                self._log(f"  📊 {log_prefix} 抓包中... (已等待{i}秒/共20秒)")
+        
+        # 移除PID监听
+        self._log(f"🔕 {log_prefix} 移除PID监听: {emulator_pids}")
+        for pid in emulator_pids:
+            service.app.process_del_pid(pid)
+        
+        if not captured_device_info:
+            # 20秒后仍未抓到包
+            self._log(f"⚠️ {log_prefix} 20秒内未抓到包，放弃当前模拟器")
+            self.shutdown_del(mm)
+            return False, "抓包超时"
 
+        # 在锁外关闭模拟器，避免阻塞其他线程
+        self._log(f"🧹 {log_prefix} 正在清理模拟器...")
         self.shutdown_del(mm)
+        self._log(f"✅ {log_prefix} 任务完成")
         return True, "运行完成"
+
+    def batch_generate_worker(self, worker_id):
+        """
+        单个工作线程，循环生成设备
+        worker_id: 窗口编号
+        """
+        # 错开线程启动时间，避免同时启动多个模拟器导致卡顿
+        initial_delay = (worker_id - 1) * 2.0  # 每个线程延迟2秒启动，避免冲突
+        if initial_delay > 0:
+            self._log(f"⏳ [窗口{worker_id}] 等待 {initial_delay} 秒后启动...")
+            time.sleep(initial_delay)
+        
+        self._log(f"🔧 [窗口{worker_id}] 工作线程启动")
+        
+        while not self.end and self.success_count < self.target_count:
+            try:
+                # 使用共享的SunnyNet服务，通过PID区分不同窗口的数据
+                success, result = self.task(worker_id=worker_id)
+                
+                if success:
+                    # task成功返回意味着已经抓到了新设备
+                    with self.file_lock:  # 使用锁保护计数器
+                        self.success_count += 1
+                        current = self.success_count
+                    self._log(f"✅ [窗口{worker_id}] 成功生成设备 ({current}/{self.target_count})")
+                else:
+                    self._log(f"❌ [窗口{worker_id}] 生成失败: {result}")
+                
+                # 短暂休息（减少等待时间）
+                time.sleep(0.5)
+                
+            except Exception as e:
+                self._log(f"❌ [窗口{worker_id}] 异常: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        self._log(f"🛑 [窗口{worker_id}] 工作线程结束")
+
+    def _run_batch(self):
+        """批量生成设备的主循环 - 共享SunnyNet服务 + PID区分"""
+        try:
+            self.running = True
+            self.success_count = 0
+            self.start_time = time.time()  # 记录开始时间
+            self._log(f"⏰ 任务开始时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.start_time))}")
+            
+            # 初始化共享的 SunnyNet 服务
+            port = 2025
+            self._log(f"🌐 初始化共享抓包服务 (端口: {port})...")
+            kill_process_by_port(port)
+            self.service = SunnyNetService(port=port, pid=[])  # 不预设PID
+            
+            if not self.service.start():
+                error_msg = self.service.get_error()
+                self._log(f"❌ SunnyNet 服务启动失败: {error_msg}")
+                if "管理员权限" in error_msg:
+                    self._log("⚠️ 【重要】请以管理员身份运行本程序！")
+                self.running = False
+                return
+            
+            self._log(f"✅ SunnyNet 共享服务已启动")
+            time.sleep(2)  # 等待服务稳定
+            
+            # 验证服务是否真的在运行
+            if not self.service.running:
+                error_msg = self.service.get_error()
+                self._log(f"❌ 服务启动后停止: {error_msg}")
+                if "管理员权限" in error_msg or "驱动加载失败" in error_msg:
+                    self._log("⚠️ 【重要】请以管理员身份运行本程序！")
+                self.running = False
+                return
+            
+            # 清理所有现有的MuMu模拟器
+            self._log("🧹 正在清理所有现有的MuMu模拟器...")
+            try:
+                Mumu = self._get_mumu()
+                if Mumu:
+                    mm = Mumu()
+                    # 使用新封装的delete_all方法
+                    mm.core.delete_all()
+                    self._log("✅ 所有模拟器已清理完成")
+            except Exception as e:
+                error_msg = str(e)
+                # 可能是没有模拟器可删除
+                if "not found" in error_msg.lower() or "不存在" in error_msg or "no player" in error_msg.lower():
+                    self._log("✓ 没有需要清理的模拟器")
+                else:
+                    self._log(f"⚠️ 清理模拟器时出错: {e}")
+            
+            # 删除后等待系统稳定
+            self._log("⏳ 等待删除完成，系统稳定中...")
+            time.sleep(5)  # 等待5秒让系统完全处理删除操作
+            
+            # 重启MuMu控制台 - 先杀死所有MuMu进程
+            self._log("🔄 正在重启MuMu控制台...")
+            try:
+                # 获取MuMuManager路径（先获取，后面需要用）
+                Mumu = self._get_mumu()
+                mumu_manager_path = None
+                if Mumu:
+                    mm = Mumu()
+                    mumu_manager_path = mm._Mumu__mumu_manager
+                
+                # 第一步：使用kill_processes_by_keyword强制杀死所有包含"MuMu"的进程
+                self._log("  🔪 正在杀死所有MuMu相关进程...")
+                killed_count = kill_processes_by_keyword("MuMu", force=True)
+                
+                if killed_count > 0:
+                    self._log(f"  ✓ 共杀死 {killed_count} 个进程")
+                    time.sleep(3)  # 等待进程完全关闭
+                else:
+                    self._log("  ℹ️ 没有找到运行中的MuMu进程")
+                
+                # 第二步：验证进程已全部关闭
+                remaining = []
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        name = proc.info['name'] or ""
+                        cmdline = proc.info['cmdline'] or []
+                        cmdline_str = " ".join(cmdline)
+                        
+                        # 检查关键词是否在进程名或命令行中
+                        if "MuMu" in name or "MuMu" in cmdline_str:
+                            remaining.append(f"{name}({proc.info['pid']})")
+                    except:
+                        pass
+                
+                if remaining:
+                    self._log(f"  ⚠️ 仍有残留进程: {remaining}")
+                else:
+                    self._log("  ✓ 所有MuMu进程已完全关闭")
+                
+                # 第三步：重新启动MuMuManager
+                if mumu_manager_path:
+                    self._log(f"  🚀 正在启动MuMuManager: {mumu_manager_path}")
+                    
+                    # 启动MuMuManager（后台启动，不显示窗口）
+                    startupinfo = None
+                    creationflags = 0
+                    if os.name == 'nt':
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        startupinfo.wShowWindow = subprocess.SW_HIDE
+                        creationflags = 0x08000000  # CREATE_NO_WINDOW
+                    
+                    subprocess.Popen([mumu_manager_path], 
+                                   startupinfo=startupinfo, 
+                                   creationflags=creationflags)
+                    self._log(f"  ✓ MuMuManager已启动")
+                    
+                    # 等待MuMuManager完全启动
+                    time.sleep(5)  # 增加等待时间
+                    
+                    # 验证MuMuManager是否真的启动了
+                    manager_started = False
+                    for proc in psutil.process_iter(['pid', 'name']):
+                        try:
+                            if proc.info['name'] == 'MuMuManager.exe':
+                                self._log(f"  ✓ MuMuManager进程已运行 (PID: {proc.info['pid']})")
+                                manager_started = True
+                                break
+                        except:
+                            pass
+                    
+                    if manager_started:
+                        self._log("✅ MuMu控制台重启成功")
+                    else:
+                        self._log("⚠️ MuMuManager可能未成功启动")
+                else:
+                    self._log("❌ 无法获取MuMuManager路径")
+                    
+            except Exception as e:
+                self._log(f"⚠️ 重启MuMu控制台时出错: {e}")
+                import traceback
+                traceback.print_exc()
+                self._log("  ℹ️ 继续执行任务...")
+            
+            self._log("⏳ 等待系统稳定...")
+            time.sleep(3)  # 增加等待时间，让系统稳定
+            
+            self._log(f"📋 准备启动 {self.window_count} 个并发窗口，目标生成 {self.target_count} 个设备")
+            self._log(f"💡 通过PID区分不同窗口的流量，完全并行，互不干扰！")
+            time.sleep(1)
+            
+            # 创建工作线程
+            threads = []
+            for i in range(self.window_count):
+                thread = threading.Thread(
+                    target=self.batch_generate_worker, 
+                    args=(i+1,),
+                    daemon=True
+                )
+                thread.start()
+                threads.append(thread)
+            
+            # 等待所有线程完成
+            for thread in threads:
+                thread.join()
+            
+            self._log(f"🎉 批量生成完成！成功: {self.success_count}/{self.target_count}")
+            
+        except Exception as e:
+            self._log(f"❌ 批量生成异常: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # 清理共享服务
+            if self.service:
+                self._log("🧹 停止共享抓包服务...")
+                self.service.stop()
+                self.service = None
+            self.running = False
 
     def _run(self):
         while True:
@@ -601,12 +999,28 @@ class Gen:
                 pass
         self.running = False
 
-    def start_task(self):
-        kill_process_by_port(2025)
-        self.service = SunnyNetService(port=2025)
-        self.service.start()
+    def start_task(self, device_count=0, window_count=1):
+        """
+        启动设备生成任务
+        
+        Args:
+            device_count: 要生成的设备数量，0表示无限循环
+            window_count: 并发窗口数
+        """
         self.end = False
-        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.target_count = device_count if device_count > 0 else 999999
+        self.window_count = max(1, min(window_count, 10))  # 限制在1-10之间
+        
+        if device_count > 0:
+            # 批量生成模式
+            self.thread = threading.Thread(target=self._run_batch, daemon=True)
+        else:
+            # 无限循环模式
+            kill_process_by_port(2025)
+            self.service = SunnyNetService(port=2025)
+            self.service.start()
+            self.thread = threading.Thread(target=self._run, daemon=True)
+        
         self.thread.start()
 
     def end_task(self):
@@ -615,7 +1029,11 @@ class Gen:
 
     def stop_task(self):
         kill_processes_by_keyword("MuMu", True)
-        self.service.stop()
+        
+        # 停止服务
+        if hasattr(self, 'service') and self.service:
+            self.service.stop()
+        
         self.end = True
         threading.Thread(target=self.end_task, daemon=True).start()
 

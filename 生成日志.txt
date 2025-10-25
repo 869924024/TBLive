@@ -1,0 +1,335 @@
+C:\Users\86992\AppData\Local\Programs\Python\Python39\python.exe F:\project\python\TBLive\main.py 
+
+📢 Tips: QFluentWidgets Pro is now released. Click https://qfluentwidgets.com/pages/pro to learn more about it.
+
+
+------------------------------------------------------
+       欢迎使用 SunnyNet 网络中间件 - V2025-08-18   
+                 本项目为开源项目  
+            仅用于技术交流学习和研究的目的 
+          请遵守法律法规,请勿用作任何非法用途 
+               否则造成一切后果自负 
+           若您下载并使用即视为您知晓并同意
+------------------------------------------------------
+        Sunny开源项目网站：https://esunny.vip
+		 SunnyNet QQ交流群(一群)：751406884
+         SunnyNet QQ交流群(二群)：545120699
+         SunnyNet QQ交流群(三群)：170902713
+         SunnyNet QQ交流群(四群)：616787804
+       QQ频道：https://pd.qq.com/g/SunnyNetV5
+------------------------------------------------------
+
+
+正在搜索包含关键词 'MuMu' 的进程...
+找到 2 个匹配的进程:
+  - PID: 56044, 名称: crashpad_handler.exe
+  - PID: 60180, 名称: MuMuNxMain.exe
+
+开始终止进程 (强制模式: 是)...
+✓ 已强制终止进程 56044 (crashpad_handler.exe)
+✓ 已强制终止进程 60180 (MuMuNxMain.exe)
+总共终止了 2 个进程
+端口 2025 没有被占用
+✅ SunnyNet 服务已启动 (端口: 2025)
+📋 准备启动 5 个并发窗口，目标生成 10 个设备
+⏱️ 窗口将依次间隔5秒启动，避免资源冲突和卡顿...
+SunnyNet服务已启动: 0.0.0.0:2025
+🔧 [窗口1] 工作线程启动
+🕐 [窗口2] 等待 5 秒后启动...
+🕐 [窗口3] 等待 10 秒后启动...
+🕐 [窗口4] 等待 15 秒后启动...
+🕐 [窗口5] 等待 20 秒后启动...
+C:\Users\86992\AppData\Local\Programs\Python\Python39\lib\site-packages\adbutils\__init__.py:19: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'create', '-n', '1']
+✅ 创建模拟器成功，索引: 59
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '59', '-k', 'resolution_height.custom', '-val', '1920', '-k', 'resolution_width.custom', '-val', '1080']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '59', '-k', 'resolution_dpi.custom', '-val', '480']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '59', '-k', 'resolution_height.custom', '-val', '1600', '-k', 'resolution_width.custom', '-val', '900']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '59', '-k', 'resolution_dpi.custom', '-val', '320']
+🔧 [窗口2] 工作线程启动
+✓ 分辨率设置完成
+正在启动模拟器...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '59', 'launch']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'create', '-n', '1']
+✅ 创建模拟器成功，索引: 63
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '63', '-k', 'resolution_height.custom', '-val', '1920', '-k', 'resolution_width.custom', '-val', '1080']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '59']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '63', '-k', 'resolution_dpi.custom', '-val', '480']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '63', '-k', 'resolution_height.custom', '-val', '1600', '-k', 'resolution_width.custom', '-val', '900']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '63', '-k', 'resolution_dpi.custom', '-val', '320']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '59']
+✓ 分辨率设置完成
+正在启动模拟器...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '63', 'launch']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '63']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '59']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '63']
+🔧 [窗口3] 工作线程启动
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'create', '-n', '1']
+✅ 创建模拟器成功，索引: 64
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '64', '-k', 'resolution_height.custom', '-val', '1920', '-k', 'resolution_width.custom', '-val', '1080']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '59']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '63']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '64', '-k', 'resolution_dpi.custom', '-val', '480']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '64', '-k', 'resolution_height.custom', '-val', '1600', '-k', 'resolution_width.custom', '-val', '900']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '59']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '64', '-k', 'resolution_dpi.custom', '-val', '320']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '63']
+✓ 分辨率设置完成
+正在启动模拟器...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '64', 'launch']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '64']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '59']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '63']
+  [启动中] 状态: start_finished, 已等待: 5秒
+✅ 模拟器启动完成 (耗时: 6秒)
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '64']
+🔧 [窗口4] 工作线程启动
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'create', '-n', '1']
+✅ 创建模拟器成功，索引: 6
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '6', '-k', 'resolution_height.custom', '-val', '1920', '-k', 'resolution_width.custom', '-val', '1080']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '63']
+尝试安装 APK: F:\project\python\TBLive\source\tm13.12.2.apk
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '59', 'app', 'install', '-apk', 'F:\\project\\python\\TBLive\\source\\tm13.12.2.apk']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '6', '-k', 'resolution_dpi.custom', '-val', '480']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '64']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '6', '-k', 'resolution_height.custom', '-val', '1600', '-k', 'resolution_width.custom', '-val', '900']
+  [启动中] 状态: start_finished, 已等待: 5秒
+✅ 模拟器启动完成 (耗时: 6秒)
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '6', '-k', 'resolution_dpi.custom', '-val', '320']
+✓ 分辨率设置完成
+正在启动模拟器...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '6', 'launch']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '64']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '6']
+🔧 [窗口5] 工作线程启动
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'create', '-n', '1']
+✅ 创建模拟器成功，索引: 10
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '10', '-k', 'resolution_height.custom', '-val', '1920', '-k', 'resolution_width.custom', '-val', '1080']
+尝试安装 APK: F:\project\python\TBLive\source\tm13.12.2.apk
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '63', 'app', 'install', '-apk', 'F:\\project\\python\\TBLive\\source\\tm13.12.2.apk']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '10', '-k', 'resolution_dpi.custom', '-val', '480']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '10', '-k', 'resolution_height.custom', '-val', '1600', '-k', 'resolution_width.custom', '-val', '900']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '64']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '6']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'setting', '-v', '10', '-k', 'resolution_dpi.custom', '-val', '320']
+✓ 分辨率设置完成安装命令返回码: 0
+正在启动模拟器...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '10', 'launch']
+
+安装命令输出: {
+  "package": "com.tmall.wireless"
+}
+
+APK 安装命令已执行
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '59', 'app', 'info', '-i']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '10']
+检查安装状态 (1/30): 找到 1 个应用
+找到天猫应用: {'package': 'com.tmall.wireless', 'app_name': '手机天猫', 'version': '13.12.2'}
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '64']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '6']
+  [启动中] 状态: starting_rom, 已等待: 5秒
+应用安装成功！
+启动天猫应用...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '59', 'app', 'launch', '-pkg', 'com.tmall.wireless']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '10']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '59', 'app', 'info', '-pkg', 'com.tmall.wireless']
+安装命令返回码: 0
+安装命令输出: {
+  "package": "com.tmall.wireless"
+}
+
+APK 安装命令已执行
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '63', 'app', 'info', '-i']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '64']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '6']
+应用启动成功 (耗时: 1秒)
+开始等待抓包...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+检查安装状态 (1/30): 找到 1 个应用
+找到天猫应用: {'package': 'com.tmall.wireless', 'app_name': '手机天猫', 'version': '13.12.2'}
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '10']
+应用安装成功！
+启动天猫应用...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '63', 'app', 'launch', '-pkg', 'com.tmall.wireless']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '64']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '6']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '10']
+✅ 模拟器启动完成 (耗时: 8秒)
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '63', 'app', 'info', '-pkg', 'com.tmall.wireless']
+尝试安装 APK: F:\project\python\TBLive\source\tm13.12.2.apk
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '64', 'app', 'install', '-apk', 'F:\\project\\python\\TBLive\\source\\tm13.12.2.apk']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '6']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+  [启动中] 状态: start_finished, 已等待: 5秒
+✅ 模拟器启动完成 (耗时: 6秒)
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+应用启动成功 (耗时: 1秒)
+开始等待抓包...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+尝试安装 APK: F:\project\python\TBLive\source\tm13.12.2.apk
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '6', 'app', 'install', '-apk', 'F:\\project\\python\\TBLive\\source\\tm13.12.2.apk']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'info', '-v', '10']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+安装命令返回码: 0
+安装命令输出: {
+  "package": "com.tmall.wireless"
+}
+
+APK 安装命令已执行
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '64', 'app', 'info', '-i']
+✅ 模拟器启动完成 (耗时: 5秒)
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+检查安装状态 (1/30): 找到 1 个应用
+找到天猫应用: {'package': 'com.tmall.wireless', 'app_name': '手机天猫', 'version': '13.12.2'}
+应用安装成功！
+启动天猫应用...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '64', 'app', 'launch', '-pkg', 'com.tmall.wireless']
+尝试安装 APK: F:\project\python\TBLive\source\tm13.12.2.apk
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '10', 'app', 'install', '-apk', 'F:\\project\\python\\TBLive\\source\\tm13.12.2.apk']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '64', 'app', 'info', '-pkg', 'com.tmall.wireless']
+安装命令返回码: 0
+安装命令输出: {
+  "package": "com.tmall.wireless"
+}
+
+APK 安装命令已执行
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '6', 'app', 'info', '-i']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+应用启动成功 (耗时: 1秒)
+开始等待抓包...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+检查安装状态 (1/30): 找到 1 个应用
+找到天猫应用: {'package': 'com.tmall.wireless', 'app_name': '手机天猫', 'version': '13.12.2'}
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+应用安装成功！
+启动天猫应用...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '6', 'app', 'launch', '-pkg', 'com.tmall.wireless']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '6', 'app', 'info', '-pkg', 'com.tmall.wireless']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+安装命令返回码: 0
+安装命令输出: {
+  "package": "com.tmall.wireless"
+}
+
+APK 安装命令已执行
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '10', 'app', 'info', '-i']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+应用启动成功 (耗时: 1秒)
+开始等待抓包...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '6', '-c', 'shell input tap 440 1142']
+检查安装状态 (1/30): 找到 1 个应用
+找到天猫应用: {'package': 'com.tmall.wireless', 'app_name': '手机天猫', 'version': '13.12.2'}
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '6', '-c', 'shell input tap 440 1142']
+应用安装成功！
+启动天猫应用...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '10', 'app', 'launch', '-pkg', 'com.tmall.wireless']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '10', 'app', 'info', '-pkg', 'com.tmall.wireless']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+应用启动成功 (耗时: 1秒)
+开始等待抓包...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '6', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '63', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+2025-10-25 06:42:49.930 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	aCwQXhOpYVfDvplVUTAKGWm6pwViFRuyHjyJylAHTN49WhQZiZH0JFft9E529kUDgGIxd0jvxMN/fJw==	JBEiQgI41m/eOUWIzzJGOkITchJxG2EQehFyAXMWYQFzFXQTcRZ3FXQUYRJyEnISchJyEnISchJyEnIBcxJhEmEScgFyEnISYRJhE2ETYRNhE2ETYRBhEmESYRJhEmESYRJhEmESYRJhEmEBcAFhEnISchJyAXISchJyAXIBcEYjAXIBYRJhE2ESYRFhZQZjEQFyAWICYhZiAmIa	JX6BrI1LPGrWYgKaGDCuj6hyY4oTYxwn	aPwA5VW2LTwDAL5lhAU1h/K8
+✅ 抓包成功！(耗时: 18秒)
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '63', 'shutdown']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '6', '-c', 'shell input tap 440 1142']
+2025-10-25 06:42:50.264 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	aCwQXhOpYVfDvplVUTAKGWm6pwViFRuyHjyJylAHTN49WhQZiZH0JFft9E529kUDgGIxd0jvxMN/fJw==	JBEiQgI41m/eOUWIzzJGOkITchJxG2EQehFyAXMWYQFzFXQTcRZ3FXQUYRJyEnISchJyEnISchJyEnIBcxJhEmEScgFyEnISYRJhE2ETYRNhE2ETYRBhEmESYRJhEmESYRJhEmESYRJhEmEBcAFhEnISchJyAXISchJyAXIBcEYjAXIBYRJhE2ESYRFhZQZjEQFyAWICYhZiAmIa	JX6BrI1LPGrWYgKaGDCuj6hyY4oTYxwn	aPwA5VW2LTwDAL5lhAU1h/K8
+✓ 模拟器已关闭
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '6', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+2025-10-25 06:42:51.876 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	a4ARIcXp618DjGYFkoOEQXC6ubU80rxaEyrRlAJamV5JuWpMUUCE3Vv+fGWGieNmoqidf0rWrhPgbW5kXRqtYUwJeXPjFz0oZSv5ySSKpcoyP28tFnympy9u1VmcjlqHvJSSWFfRMTYKazKVlV7/dIb3jYgpiAWwKYuE=	JBFsjc12GSERd4rGAHyJdI1dvVy+Va5etV+9T7xZrk+8W7tdvli4W7tarly9XL1cvVy9XL1cvVy9XL1PvF2uXK5cvU+9XL1crlyuXa5drl2uXa5drl6uXK5crlyuXK5crlyuXK5crlyuXK5Pv0+uXL1cvVy9T71cvVy9T71PvwjsT71PrlyuXa5crl+uK8kt3k+9T61MrVmtTK1V	JX6BrI1LPGrWYgKaGDCuj6hyY4oTYxwn	aPwA5VW2LTwDAL5lhAU1h/K8
+2025-10-25 06:42:51.890 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	aygQYPTbse2zdMczwLSrem1zFvBVkuRiDMqo77tCqmwRi+WCZo7k8mGcD7QFQr4ABnUpoPqQ2ck5kbU5Yjtk/NzwGKSC5JkFx2smawKSCN1LXQNUUhQ4WRLuYOEjpWIkpbKbsACFXfe6lLE8+oD0CK081cxgxC3dW+ys=	JBFC97dYYw9rWfDoelLzWvdzx3LEe9Rwz3HHYcZ01GHGdcFzxHbCdcF01HLHcsdyx3LHcsdyx3LHcsdhxnDUctRyx2HHcsdy1HLUc9Rz1HPUc9Rz1HDUctRy1HLUctRy1HLUctRy1HLUctRhxWHUcsdyx3LHYcdyx3LHYcdhxSaWYcdh1HLUc9Ry1HHUBbMDpGHHYddi13TXYtd7	3EuBUoNLPJYkYQKaGJZa6rexY5P3eIpm	aPwA5VW2LTwDAL5lhAU1h/K8
+2025-10-25 06:42:51.909 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	aVATqeX8fDwxfjtp/R9hEVFIcQHHV1S+bdajintFkprYtWhRbUyl07XX00QfQoxVcoautHg7aFjmPrJODqugyawhwrHHbGYXMY8sDZZd4jhyq2ytlIXQVALo55+MEqpMzMdq2Bb5++tpr3XyUfwN+lFJM9VfmfO4o3bY=	JBHspub2MqE696FGK/yi9KbdltyV1YXent+Wz5fbhc+X25DdldiT25DahdyW3JbcltyW3JbcltyW3JbPl9+F3IXcls+W3JbchdyF3YXdhd2F3YXdhd6F3IXchdyF3IXchdyF3IXchdyF3IXPlM+F3JbcltyWz5bcltyWz5bPlIjHz5bPhdyF3YXchd+Fq+Kt9c+Wz4bMhtuGzIbV	3EuBUoNLPJYkYQKaGJZa6rexY5P3eIpm	aPwA5VW2LTwDAL5lhAU1h/K8
+2025-10-25 06:42:51.989 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	aVATqeX8fDwxfjtp/R9hEVFIcQHHV1S+bdajintFkprYtWhRbUyl07XX00QfQoxVcoautHg7aFjmPrJODqugyawhwrHHbGYXMY8sDZZd4jhyq2ytlIXQVALo55+MEqpMzMdq2Bb5++tpr3XyUfwN+lFJM9VfmfO4o3bY=	JBHspub2MqE696FGK/yi9KbdltyV1YXent+Wz5fbhc+X25DdldiT25DahdyW3JbcltyW3JbcltyW3JbPl9+F3IXcls+W3JbchdyF3YXdhd2F3YXdhd6F3IXchdyF3IXchdyF3IXchdyF3IXPlM+F3JbcltyWz5bcltyWz5bPlIjHz5bPhdyF3YXchd+Fq+Kt9c+Wz4bMhtuGzIbV	3EuBUoNLPJYkYQKaGJZa6rexY5P3eIpm	aPwA5VW2LTwDAL5lhAU1h/K8
+2025-10-25 06:42:52.029 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	aZwS8vLeIK+F/CGyMUlKpOQgTxEtx70cpv/NOldwvwTgRmo1lQ0kjRMYudvp2q7z7L1Vu2cdXLrBVHBqMscRJkGRtx7+sOSsvfLVdpMyZMO5kXcNJbF9QZs/zhEgwE6OC6Tmo88h+uf+1N6LbtNte217b5iUWaXaHQuw=	JBGEWBiezMnEn18u1ZRcnFi1aLRrvXu2YLdop2m8e6dps261a7Bts26ye7RotGi0aLRotGi0aLRotGinabB7tHu0aKdotGi0e7R7tXu1e7V7tXu1e7Z7tHu0e7R7tHu0e7R7tHu0e7R7tHunaqd7tGi0aLRop2i0aLRop2inauA5p2ine7R7tXu0e7d7wxzFC6dop3ikeLx4pHi9	3EuBUoNLPJYkYQKaGJZa6rexY5P3eIpm	aPwA5VW2LTwDAL5lhAU1h/K8
+2025-10-25 06:42:52.039 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	a4ARIcXp618DjGYFkoOEQXC6ubU80rxaEyrRlAJamV5JuWpMUUCE3Vv+fGWGieNmoqidf0rWrhPgbW5kXRqtYUwJeXPjFz0oZSv5ySSKpcoyP28tFnympy9u1VmcjlqHvJSSWFfRMTYKazKVlV7/dIb3jYgpiAWwKYuE=	JBFsjc12GSERd4rGAHyJdI1dvVy+Va5etV+9T7xZrk+8W7tdvli4W7tarly9XL1cvVy9XL1cvVy9XL1PvF2uXK5cvU+9XL1crlyuXa5drl2uXa5drl6uXK5crlyuXK5crlyuXK5crlyuXK5Pv0+uXL1cvVy9T71cvVy9T71PvwjsT71PrlyuXa5crl+uK8kt3k+9T61MrVmtTK1V	JX6BrI1LPGrWYgKaGDCuj6hyY4oTYxwn	aPwA5VW2LTwDAL5lhAU1h/K8
+2025-10-25 06:42:52.054 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	aygQYPTbse2zdMczwLSrem1zFvBVkuRiDMqo77tCqmwRi+WCZo7k8mGcD7QFQr4ABnUpoPqQ2ck5kbU5Yjtk/NzwGKSC5JkFx2smawKSCN1LXQNUUhQ4WRLuYOEjpWIkpbKbsACFXfe6lLE8+oD0CK081cxgxC3dW+ys=	JBFC97dYYw9rWfDoelLzWvdzx3LEe9Rwz3HHYcZ01GHGdcFzxHbCdcF01HLHcsdyx3LHcsdyx3LHcsdhxnDUctRyx2HHcsdy1HLUc9Rz1HPUc9Rz1HDUctRy1HLUctRy1HLUctRy1HLUctRhxWHUcsdyx3LHYcdyx3LHYcdhxSaWYcdh1HLUc9Ry1HHUBbMDpGHHYddi13TXYtd7	3EuBUoNLPJYkYQKaGJZa6rexY5P3eIpm	aPwA5VW2LTwDAL5lhAU1h/K8
+2025-10-25 06:42:52.101 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	aZwS8vLeIK+F/CGyMUlKpOQgTxEtx70cpv/NOldwvwTgRmo1lQ0kjRMYudvp2q7z7L1Vu2cdXLrBVHBqMscRJkGRtx7+sOSsvfLVdpMyZMO5kXcNJbF9QZs/zhEgwE6OC6Tmo88h+uf+1N6LbtNte217b5iUWaXaHQuw=	JBGEWBiezMnEn18u1ZRcnFi1aLRrvXu2YLdop2m8e6dps261a7Bts26ye7RotGi0aLRotGi0aLRotGinabB7tHu0aKdotGi0e7R7tXu1e7V7tXu1e7Z7tHu0e7R7tHu0e7R7tHu0e7R7tHunaqd7tGi0aLRop2i0aLRop2inauA5p2ine7R7tXu0e7d7wxzFC6dop3ikeLx4pHi9	3EuBUoNLPJYkYQKaGJZa6rexY5P3eIpm	aPwA5VW2LTwDAL5lhAU1h/K8
+✅ 抓包成功！(耗时: 5秒)
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '6', 'shutdown']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '64', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+2025-10-25 06:42:52.389 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	a1ASWiNxQusAHJUfE+sDi32UftFjgfQrWeBQQeD6Nm0ToKcmfaAfs7uk+7CCnBHakY6UF7AdoGluVQ3BY07hK9KYE83OE/kv4t83TauUe6xuZYLFtPVGbO/56EqlTupkzmYKol+fFBDLMF81ChZ8dWuUngWypFiwMYYs=	JBFmXR18ySvBfVrM0HZZfl1XbVZuX35UZVVtRW9WfkVsUWtXblJoUWtQflZtVm1WbVZtVm1WbVZtVm1FbFB+Vn5WbUVtVm1WflZ+V35Xfld+V35XflR+Vn5WflZ+Vn5WflZ+Vn5WflZ+Vn5Fb0V+Vm1WbVZtRW1WbVZtRW1FbwI8RW1FflZ+V35WflV+IRknDkVtRX1GfQd9Rn0D	3EuBUoNLPJYkYQKaGJZa6rexY5P3eIpm	aPwA5VW2LTwDAL5lhAU1h/K8
+2025-10-25 06:42:52.448 | INFO     | generate_device:http_callback:235 - 捕获到设备信息: AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	a1ASWiNxQusAHJUfE+sDi32UftFjgfQrWeBQQeD6Nm0ToKcmfaAfs7uk+7CCnBHakY6UF7AdoGluVQ3BY07hK9KYE83OE/kv4t83TauUe6xuZYLFtPVGbO/56EqlTupkzmYKol+fFBDLMF81ChZ8dWuUngWypFiwMYYs=	JBFmXR18ySvBfVrM0HZZfl1XbVZuX35UZVVtRW9WfkVsUWtXblJoUWtQflZtVm1WbVZtVm1WbVZtVm1FbFB+Vn5WbUVtVm1WflZ+V35Xfld+V35XflR+Vn5WflZ+Vn5WflZ+Vn5WflZ+Vn5Fb0V+Vm1WbVZtRW1WbVZtRW1FbwI8RW1FflZ+V35WflV+IRknDkVtRX1GfQd9Rn0D	3EuBUoNLPJYkYQKaGJZa6rexY5P3eIpm	aPwA5VW2LTwDAL5lhAU1h/K8
+✅ 抓包成功！(耗时: 12秒)
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '64', 'shutdown']
+✓ 模拟器已关闭
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+✓ 模拟器已关闭
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '63', 'shutdown']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '59', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+⚠️ 30秒内未抓到包，放弃当前模拟器
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '59', 'shutdown']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '6', 'shutdown']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '64', 'shutdown']
+✓ 模拟器已关闭
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+✓ 模拟器进程已停止
+✓ 模拟器进程已停止
+✓ 模拟器进程已停止['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'control', '-v', '59', 'shutdown']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'delete', '-v', '63']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+✓ 模拟器已删除
+✓ 模拟器进程已停止
+✅ 单个模拟器清理完成
+✅ [窗口2] 成功生成设备 (1/10): AsX1FO25muvTjKNT4Nf7WyPrZ7YbCT376YAhqpgVgSC7	a1ASW...
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'delete', '-v', '6']
+['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'adb', '-v', '10', '-c', 'shell input tap 440 1142']
+✓ 模拟器已删除
+✅ 单个模拟器清理完成['D:\\MuMuPlayer\\nx_main\\MuMuManager.exe', 'delete', '-v', '64']
+
+Process finished with exit code -1073741819 (0xC0000005)

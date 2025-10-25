@@ -499,6 +499,56 @@ class AccountPage(QWidget):
         title = SubtitleLabel("📱 设备数据")
         card_layout.addWidget(title)
 
+        # 配置区域 - 水平布局
+        config_h_layout = QHBoxLayout()
+        config_h_layout.setSpacing(15)
+
+        # 设备数量输入
+        device_num_frame = QFrame()
+        device_num_frame.setFrameStyle(QFrame.NoFrame)
+        device_num_layout = QVBoxLayout(device_num_frame)
+        device_num_layout.setContentsMargins(0, 0, 0, 0)
+        device_num_layout.setSpacing(5)
+
+        device_num_label = BodyLabel("生成设备数量:")
+        device_num_layout.addWidget(device_num_label)
+
+        self.device_num_input = LineEdit()
+        self.device_num_input.setPlaceholderText("例如：10")
+        self.device_num_input.setText("1")  # 默认值为1
+        self.device_num_input.setFixedWidth(120)
+        device_num_layout.addWidget(self.device_num_input)
+
+        config_h_layout.addWidget(device_num_frame)
+
+        # 窗口数（线程数）输入
+        window_num_frame = QFrame()
+        window_num_frame.setFrameStyle(QFrame.NoFrame)
+        window_num_layout = QVBoxLayout(window_num_frame)
+        window_num_layout.setContentsMargins(0, 0, 0, 0)
+        window_num_layout.setSpacing(5)
+
+        window_num_label = BodyLabel("并发窗口数:")
+        window_num_layout.addWidget(window_num_label)
+
+        self.window_num_input = LineEdit()
+        self.window_num_input.setPlaceholderText("例如：3")
+        self.window_num_input.setText("1")  # 默认值为1
+        self.window_num_input.setFixedWidth(120)
+        window_num_layout.addWidget(self.window_num_input)
+
+        config_h_layout.addWidget(window_num_frame)
+
+        # 添加伸缩空间
+        config_h_layout.addStretch()
+
+        card_layout.addLayout(config_h_layout)
+
+        # 提示信息
+        tip_label = CaptionLabel("提示：通过PID区分不同窗口的流量，所有操作完全并行，互不干扰！窗口数建议2-5个")
+        tip_label.setWordWrap(True)
+        card_layout.addWidget(tip_label)
+
         # 按钮水平布局
         button_h_layout = QHBoxLayout()
         button_h_layout.setSpacing(10)
@@ -518,6 +568,14 @@ class AccountPage(QWidget):
         # 设备数量标签
         self.device_count_label = CaptionLabel("当前设备数: 0")
         card_layout.addWidget(self.device_count_label)
+        
+        # 进度显示标签
+        self.device_progress_label = CaptionLabel("生成进度: --/--")
+        card_layout.addWidget(self.device_progress_label)
+        
+        # 耗时显示标签
+        self.device_time_label = CaptionLabel("耗时: --")
+        card_layout.addWidget(self.device_time_label)
 
         # 设备列表
         self.device_list = ListWidget()
@@ -571,30 +629,98 @@ class AccountPage(QWidget):
                 if self.parent_window:
                     self.parent_window.add_log(f"❌ 导入失败: {str(e)}")
 
+    def format_elapsed_time(self, seconds):
+        """格式化耗时显示"""
+        if seconds < 60:
+            return f"{seconds}秒"
+        elif seconds < 3600:
+            minutes = seconds // 60
+            secs = seconds % 60
+            return f"{minutes}分{secs}秒"
+        else:
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            return f"{hours}小时{minutes}分"
+    
+    def update_progress_display(self):
+        """更新进度显示"""
+        try:
+            progress_info = self.gen_device.get_progress_info()
+            
+            # 更新进度标签
+            success = progress_info['success_count']
+            target = progress_info['target_count']
+            if target == 999999:  # 无限循环模式
+                self.device_progress_label.setText(f"生成进度: {success}个 (无限模式)")
+            else:
+                self.device_progress_label.setText(f"生成进度: {success}/{target}")
+            
+            # 更新耗时标签
+            elapsed = progress_info['elapsed_time']
+            self.device_time_label.setText(f"耗时: {self.format_elapsed_time(elapsed)}")
+            
+        except Exception as e:
+            pass
+    
     def toggle_device_generation(self):
-        kill_processes_by_keyword("MuMu")
         """切换设备生成状态"""
         if not self.is_generating_device:
+            # 启动前先清理所有残留的MuMu进程，确保环境干净
+            if self.parent_window:
+                self.parent_window.add_log("🧹 清理残留进程...")
+            kill_processes_by_keyword("MuMu", True)
+            
             if self.gen_device.get_status():
                 self.gen_device.stop_task()
                 return
+
+            # 获取用户输入
+            try:
+                device_count = int(self.device_num_input.text().strip())
+                if device_count < 0:
+                    device_count = 0  # 0表示无限循环
+            except ValueError:
+                device_count = 0  # 默认无限循环
+            
+            try:
+                window_count = int(self.window_num_input.text().strip())
+                if window_count < 1:
+                    window_count = 1
+                if window_count > 10:
+                    window_count = 10
+            except ValueError:
+                window_count = 1  # 默认1个窗口
+
+            # 设置日志回调，让generate_device的日志也输出到UI
+            if self.parent_window:
+                self.gen_device.set_log_callback(self.parent_window.add_log)
 
             # 开始生成
             self.is_generating_device = True
             self.device_generate_btn.setText("停止生成设备")
             self.device_generate_btn.setIcon(FIF.PAUSE)
 
-            # 启动定时器持续刷新设备列表
+            # 启动定时器持续刷新设备列表和进度
             self.device_refresh_timer = QTimer()
             self.device_refresh_timer.timeout.connect(self.load_existing_devices)
             self.device_refresh_timer.start(1000)  # 每秒刷新一次
+            
+            # 启动进度更新定时器
+            self.progress_timer = QTimer()
+            self.progress_timer.timeout.connect(self.update_progress_display)
+            self.progress_timer.start(500)  # 每0.5秒更新一次进度
 
-            self.gen_device.start_task()
+            # 传递参数启动任务
+            self.gen_device.start_task(device_count=device_count, window_count=window_count)
 
             if self.parent_window:
-                self.parent_window.add_log("🔄 开始循环生成设备数据...")
+                if device_count > 0:
+                    self.parent_window.add_log(f"🔄 开始生成设备 (目标: {device_count}个, 并发: {window_count}个窗口)...")
+                else:
+                    self.parent_window.add_log(f"🔄 开始循环生成设备 (并发: {window_count}个窗口)...")
         else:
-
+            # === 停止生成 ===
+            
             # 停止生成
             self.is_generating_device = False
             self.device_generate_btn.setText("开始生成设备")
@@ -603,11 +729,20 @@ class AccountPage(QWidget):
             # 停止定时器
             if hasattr(self, 'device_refresh_timer'):
                 self.device_refresh_timer.stop()
+            
+            # 停止进度更新定时器
+            if hasattr(self, 'progress_timer'):
+                self.progress_timer.stop()
+            
+            # 重置显示
+            self.device_progress_label.setText("生成进度: --/--")
+            self.device_time_label.setText("耗时: --")
 
+            # 停止任务（内部会kill所有MuMu进程）
             self.gen_device.stop_task()
 
             if self.parent_window:
-                self.parent_window.add_log("⏸️ 停止生成设备数据")
+                self.parent_window.add_log("🛑 停止生成设备，正在清理所有模拟器...")
 
     def on_device_generated(self, success, data):
         """设备生成完成后的回调（在主线程中执行）"""
