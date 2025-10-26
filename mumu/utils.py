@@ -73,23 +73,40 @@ class utils:
             else:
                 command_extend = command
             print(command_extend)
-            result = subprocess.run(command_extend, shell=False, check=False, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    encoding='utf-8', timeout=10)  # 添加10秒超时
-
-            ret_code = result.returncode
-            retval = result.stdout
-
-            # print(retval)
-
-            return ret_code, retval
+            
+            # 使用 Popen + communicate，超时控制更可靠
+            process = subprocess.Popen(
+                command_extend, 
+                shell=False, 
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding='utf-8'
+            )
+            
+            try:
+                # 等待进程完成，带超时
+                stdout, stderr = process.communicate(timeout=5)  # 改为5秒超时
+                ret_code = process.returncode
+                retval = stdout
+                return ret_code, retval
+            except subprocess.TimeoutExpired:
+                # 超时后强制杀死进程
+                print(f"⚠️ 命令执行超时(5秒)，强制终止进程")
+                process.kill()
+                try:
+                    process.communicate(timeout=1)  # 等待1秒让进程完全终止
+                except:
+                    pass
+                return -1, "Timeout: Command killed after 5 seconds"
 
         except subprocess.TimeoutExpired as e:
             # 超时异常
-            print(f"⚠️ 命令执行超时(10秒): {command_extend}")
+            print(f"⚠️ 命令执行超时: {str(e)}")
             return -1, f"Timeout: {str(e)}"
         except subprocess.CalledProcessError as e:
             ret_code = e.returncode
             retval = e.stderr
-
             return ret_code, retval
+        except Exception as e:
+            print(f"⚠️ 命令执行异常: {str(e)}")
+            return -1, f"Error: {str(e)}"

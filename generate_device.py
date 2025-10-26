@@ -7,6 +7,9 @@ import psutil
 import os
 import subprocess
 import socket
+import win32gui
+import win32con
+import win32api
 
 
 def kill_process_by_port(port):
@@ -150,6 +153,100 @@ def get_free_port():
     port = s.getsockname()[1]  # 获取被分配的端口
     s.close()
     return port
+
+
+def find_mumu_window(vm_index, debug=False):
+    """
+    根据模拟器索引查找MuMu窗口句柄
+    步骤：1.找父窗口(MuMu安装设备-X) 2.遍历子窗口找MuMuNxDevice
+    """
+    # 第一步：找父窗口 (MuMu安卓设备-X 或 MuMu安装设备-X 或 MuMu模拟器-X)
+    def find_parent_callback(hwnd, parents):
+        if win32gui.IsWindowVisible(hwnd):
+            title = win32gui.GetWindowText(hwnd)
+            # 匹配父窗口标题
+            if (f"MuMu安卓设备-{vm_index}" in title or 
+                f"MuMu安装设备-{vm_index}" in title or 
+                f"MuMu模拟器-{vm_index}" in title or
+                f"MuMu安卓设备{vm_index}" in title or
+                f"MuMu安装设备{vm_index}" in title or 
+                f"MuMu模拟器{vm_index}" in title):
+                parents.append((hwnd, title))
+        return True
+    
+    parent_windows = []
+    win32gui.EnumWindows(find_parent_callback, parent_windows)
+    
+    if debug:
+        print(f"[调试] 找到 {len(parent_windows)} 个父窗口")
+        for hwnd, title in parent_windows:
+            print(f"  - 父窗口: {hwnd}, 标题:'{title}'")
+    
+    if not parent_windows:
+        if debug:
+            print(f"[调试] 未找到父窗口 (MuMu安卓设备-{vm_index} 或 MuMu安装设备-{vm_index} 或 MuMu模拟器-{vm_index})")
+        return None
+    
+    # 第二步：遍历每个父窗口的子窗口，找 MuMuNxDevice
+    def find_child_callback(hwnd, children):
+        title = win32gui.GetWindowText(hwnd)
+        class_name = win32gui.GetClassName(hwnd)
+        # 查找标题包含 Device 或 Player 的子窗口
+        if "Device" in title or "Player" in title:
+            children.append((hwnd, title, class_name))
+        return True
+    
+    for parent_hwnd, parent_title in parent_windows:
+        children = []
+        try:
+            win32gui.EnumChildWindows(parent_hwnd, find_child_callback, children)
+            if debug:
+                print(f"[调试] 父窗口 {parent_hwnd} 有 {len(children)} 个子窗口")
+                for hwnd, title, cls in children:
+                    print(f"    - 子窗口: {hwnd}, 标题:'{title}', 类:{cls}")
+            
+            # 找到第一个匹配的子窗口就返回
+            if children:
+                target_hwnd = children[0][0]
+                if debug:
+                    print(f"[调试] 返回子窗口: {target_hwnd}")
+                return target_hwnd
+        except Exception as e:
+            if debug:
+                print(f"[调试] 枚举子窗口失败: {e}")
+    
+    if debug:
+        print(f"[调试] 未找到任何子窗口")
+    return None
+
+
+def click_window_background(hwnd, x, y):
+    """
+    使用Windows API后台点击窗口，不需要ADB
+    
+    :param hwnd: 窗口句柄
+    :param x: 相对于窗口的x坐标
+    :param y: 相对于窗口的y坐标
+    :return: 是否成功
+    """
+    if not hwnd:
+        return False
+    
+    try:
+        # 计算坐标（MAKELONG）
+        lParam = win32api.MAKELONG(x, y)
+        
+        # 发送鼠标按下消息
+        win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lParam)
+        time.sleep(0.05)  # 短暂延迟
+        
+        # 发送鼠标抬起消息
+        win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lParam)
+        
+        return True
+    except Exception as e:
+        print(f"后台点击失败: {e}")
+        return False
 
 
 TARGET_HEADERS = ["x-umt", "x-sgext", "x-mini-wua", "x-ttid", "x-utdid", "x-devid"]
@@ -711,6 +808,28 @@ class Gen:
                 self._log(f"❌ {log_prefix} APP启动失败")
                 return False, "APP运行失败"
             
+            # 获取模拟器窗口句柄（用于后台点击）
+            # 访问私有变量 __vm_index (Python名称修饰：_Mumu__vm_index)
+            vm_index = mm._Mumu__vm_index
+            self._log(f"🔍 {log_prefix} 正在查找窗口句柄 (模拟器索引:{vm_index})...")
+            
+            # 等待窗口显示，重试5次，每次等待更长时间
+            window_hwnd = None
+            for retry in range(5):
+                window_hwnd = find_mumu_window(vm_index, debug=(retry==0))  # 第一次启用调试
+                if window_hwnd:
+                    self._log(f"✓ {log_prefix} 第{retry+1}次查找成功")
+                    break
+                if retry < 4:
+                    wait_time = 2  # 等待2秒
+                    self._log(f"  {log_prefix} 第{retry+1}次未找到，等待{wait_time}秒后重试...")
+                    time.sleep(wait_time)
+            
+            if window_hwnd:
+                self._log(f"✓ {log_prefix} 找到窗口句柄: {window_hwnd}")
+            else:
+                self._log(f"⚠️ {log_prefix} 未找到窗口句柄，将使用ADB点击")
+            
             # 添加当前模拟器进程到监听列表
             self._log(f"📡 {log_prefix} 添加PID监听: {emulator_pids}")
             for pid in emulator_pids:
@@ -737,15 +856,27 @@ class Gen:
                     self._log(f"⚠️ {log_prefix} 任务被中止(抓包阶段)")
                     return False, "任务被中止"
                 
-                # 点击界面（添加异常处理，避免卡住）
-                try:
-                    mm.adb.click(176, 458)
-                    # 每3秒输出一次点击日志
-                    if i == 0 or i % 3 == 0:
-                        self._log(f"  👆 {log_prefix} 点击界面触发请求 (第{i+1}次, 坐标:176,458)")
-                except Exception as e:
-                    self._log(f"  ⚠️ {log_prefix} 点击失败(第{i+1}次): {e}")
-                    # 点击失败不影响继续，可能之前已经触发过请求了
+                # 点击界面（优先使用窗口句柄后台点击，完全绕过ADB）
+                click_success = False
+                
+                # 方案1：窗口句柄点击（推荐，不会卡死）
+                if window_hwnd:
+                    try:
+                        if click_window_background(window_hwnd, 176, 458):
+                            click_success = True
+                            if i == 0 or i % 3 == 0:
+                                self._log(f"  👆 {log_prefix} [窗口句柄] 点击界面 (第{i+1}次)")
+                    except Exception as e:
+                        self._log(f"  ⚠️ {log_prefix} 窗口句柄点击失败: {e}，尝试ADB")
+                
+                # 方案2：ADB点击（fallback，可能卡死）
+                if not click_success:
+                    try:
+                        mm.adb.click(176, 458)
+                        if i == 0 or i % 3 == 0:
+                            self._log(f"  👆 {log_prefix} [ADB] 点击界面 (第{i+1}次)")
+                    except Exception as e:
+                        self._log(f"  ⚠️ {log_prefix} 点击失败(第{i+1}次): {e}")
                 
                 # 增加点击间隔到1.5秒，降低并发压力
                 time.sleep(1.5)
