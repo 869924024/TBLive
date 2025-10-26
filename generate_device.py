@@ -1042,15 +1042,47 @@ class Gen:
 
 
 if __name__ == '__main__':
+    import argparse
+    
+    # 创建命令行参数解析器
+    parser = argparse.ArgumentParser(description='批量生成设备参数')
+    parser.add_argument('-n', '--num', type=int, default=0, 
+                        help='要生成的设备数量（默认0表示一直运行）')
+    parser.add_argument('-w', '--windows', type=int, default=1, 
+                        help='并发窗口数（默认1，范围1-10）')
+    
+    args = parser.parse_args()
+    
+    device_count = args.num
+    window_count = args.windows
+    
+    print("="*60)
+    print("🚀 设备参数批量生成工具")
+    print("="*60)
+    if device_count > 0:
+        print(f"📊 生成数量: {device_count} 个")
+    else:
+        print(f"📊 生成数量: 无限循环")
+    print(f"🪟 并发窗口: {window_count} 个")
+    print("="*60)
+    print()
+    
     gen = Gen()
     try:
-        result = gen.task()
-        print(f"✅ 任务完成: {result}")
+        # 启动批量生成任务
+        gen.start_task(device_count=device_count, window_count=window_count)
+        
+        # 等待任务完成或用户中断
+        while gen.running:
+            time.sleep(1)
+        
+        print(f"\n✅ 任务完成")
+        
     except KeyboardInterrupt:
         print("\n⚠️ 用户中断任务")
+        gen.stop_task()
     except Exception as e:
         import traceback
-
         print(f"❌ 任务执行出错: {e}")
         traceback.print_exc()
     finally:
