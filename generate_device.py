@@ -612,167 +612,186 @@ class Gen:
         if not service or not service.running:
             return False, "SunnyNet服务未启动"
         
-        # 使用锁保护创建和设置分辨率操作
-        if worker_id:
-            self._log(f"🔒 [窗口{worker_id}] 等待创建模拟器...")
-        with self.create_lock:
+        mm = None  # 初始化 mm，确保 finally 中可以访问
+        try:
+            # 使用锁保护创建和设置分辨率操作
             if worker_id:
-                self._log(f"✓ [窗口{worker_id}] 开始创建模拟器")
-            success, mm = self.create_emulator_internal()
-            if not success:
-                return success, mm
+                self._log(f"🔒 [窗口{worker_id}] 等待创建模拟器...")
+            with self.create_lock:
+                if worker_id:
+                    self._log(f"✓ [窗口{worker_id}] 开始创建模拟器")
+                success, mm = self.create_emulator_internal()
+                if not success:
+                    return success, mm
             
-            # 在锁内完成分辨率设置（最小配置，节省资源）
-            mm.screen.resolution_mobile()
-            mm.screen.resolution(360, 640)
-            mm.screen.dpi(120)
+                # 在锁内完成分辨率设置（最小配置，节省资源）
+                mm.screen.resolution_mobile()
+                mm.screen.resolution(360, 640)
+                mm.screen.dpi(120)
+                log_prefix = f"[窗口{worker_id}]" if worker_id else ""
+                self._log(f"✓ {log_prefix} 分辨率设置完成 (360x640, DPI:120)")
+                
+                # 创建完成后间隔一下，避免创建过快导致问题
+                time.sleep(2.0)  # 增加延迟，确保系统稳定
+            
+            # 记录启动前的进程PID
+            pids_before = set()
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    if proc.info['name'] in ['MuMuNxDevice.exe', 'MuMuVMMHeadless.exe']:
+                        pids_before.add(proc.info['pid'])
+                except:
+                    pass
+            
+            # 锁释放后，启动模拟器（可以并行）
             log_prefix = f"[窗口{worker_id}]" if worker_id else ""
-            self._log(f"✓ {log_prefix} 分辨率设置完成 (360x640, DPI:120)")
+            self._log(f"🚀 {log_prefix} 正在启动模拟器...")
             
-            # 创建完成后间隔一下，避免创建过快导致问题
-            time.sleep(2.0)  # 增加延迟，确保系统稳定
-        
-        # 记录启动前的进程PID
-        pids_before = set()
-        for proc in psutil.process_iter(['pid', 'name']):
-            try:
-                if proc.info['name'] in ['MuMuNxDevice.exe', 'MuMuVMMHeadless.exe']:
-                    pids_before.add(proc.info['pid'])
-            except:
-                pass
-        
-        # 锁释放后，启动模拟器（可以并行）
-        log_prefix = f"[窗口{worker_id}]" if worker_id else ""
-        self._log(f"🚀 {log_prefix} 正在启动模拟器...")
-        
-        # 启动前稍作延迟，避免系统资源冲突
-        time.sleep(1.0)
-        mm.power.start()
-        flag = False
-        for i in range(25):  # 缩短到25秒超时
-            if self.end:
-                break
-            try:
-                info = mm.info.get_info()
-                state = info.get("player_state", "unknown")
+            # 启动前稍作延迟，避免系统资源冲突
+            time.sleep(1.0)
+            mm.power.start()
+            flag = False
+            for i in range(25):  # 缩短到25秒超时
+                if self.end:
+                    self._log(f"⚠️ {log_prefix} 任务被中止")
+                    return False, "任务被中止"
+                try:
+                    info = mm.info.get_info()
+                    state = info.get("player_state", "unknown")
+                    
+                    # 每5秒输出一次状态
+                    if i % 5 == 0 and i > 0:
+                        self._log(f"  {log_prefix} [启动中] 状态: {state}, 已等待: {i}秒")
+                    
+                    if state == "start_finished":
+                        self._log(f"✅ {log_prefix} 模拟器启动完成 (耗时: {i+1}秒)")
+                        flag = True
+                        break
+                    elif state == "wait":
+                        self._log(f"⚠️ {log_prefix} 模拟器进入等待状态 ({i}秒)")
+                except Exception as e:
+                    if i % 10 == 0:
+                        self._log(f"  检查状态异常: {e}")
+                time.sleep(1)
                 
-                # 每5秒输出一次状态
-                if i % 5 == 0 and i > 0:
-                    self._log(f"  {log_prefix} [启动中] 状态: {state}, 已等待: {i}秒")
-                
-                if state == "start_finished":
-                    self._log(f"✅ {log_prefix} 模拟器启动完成 (耗时: {i+1}秒)")
-                    flag = True
-                    break
-                elif state == "wait":
-                    self._log(f"⚠️ {log_prefix} 模拟器进入等待状态 ({i}秒)")
-            except Exception as e:
-                if i % 10 == 0:
-                    self._log(f"  检查状态异常: {e}")
-            time.sleep(1)
+            if not flag:
+                self._log(f"❌ {log_prefix} 模拟器启动超时(25秒)")
+                return False, "模拟器启动超时"
             
-        if not flag:
-            self._log(f"❌ {log_prefix} 模拟器启动超时(25秒)")
-            self.shutdown_del(mm)
-            return False, "模拟器启动超时"
-        
-        time.sleep(1.0)
-        
-        # 安装APP
-        self._log(f"📦 {log_prefix} 正在安装APP...")
-        if not self.install_app(mm):
-            self.shutdown_del(mm)
-            return False, "APP安装失败"
-        self._log(f"✓ {log_prefix} APP安装完成")
+            time.sleep(1.0)
+            
+            # 安装APP
+            self._log(f"📦 {log_prefix} 正在安装APP...")
+            if not self.install_app(mm):
+                return False, "APP安装失败"
+            self._log(f"✓ {log_prefix} APP安装完成")
 
-        # 获取新启动的模拟器进程PID（启动后 - 启动前）
-        self._log(f"🔍 {log_prefix} 正在获取模拟器进程PID...")
-        pids_after = set()
-        for proc in psutil.process_iter(['pid', 'name']):
-            try:
-                if proc.info['name'] in ['MuMuNxDevice.exe', 'MuMuVMMHeadless.exe']:
-                    pids_after.add(proc.info['pid'])
-            except:
-                pass
-        
-        # 新增的PID就是当前模拟器的PID
-        emulator_pids = list(pids_after - pids_before)
-        
-        if not emulator_pids:
-            self._log(f"⚠️ {log_prefix} 未找到新增PID，将监听所有MuMu进程")
-            emulator_pids = list(pids_after)  # fallback: 使用所有PID
-        else:
-            self._log(f"✓ {log_prefix} 找到新增 PID: {emulator_pids}")
-        
-        # 启动APP
-        self._log(f"▶️ {log_prefix} 正在启动APP...")
-        if not self.launch_app(mm):
-            self._log(f"❌ {log_prefix} APP启动失败")
-            self.shutdown_del(mm)
-            return False, "APP运行失败"
-        
-        # 添加当前模拟器进程到监听列表
-        self._log(f"📡 {log_prefix} 添加PID监听: {emulator_pids}")
-        for pid in emulator_pids:
-            service.app.process_add_pid(pid)
-        
-        time.sleep(0.5)  # 等待PID监听生效
-        
-        # 清空该PID的旧数据
-        with service.deviceInfo_lock:
+            # 获取新启动的模拟器进程PID（启动后 - 启动前）
+            self._log(f"🔍 {log_prefix} 正在获取模拟器进程PID...")
+            pids_after = set()
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    if proc.info['name'] in ['MuMuNxDevice.exe', 'MuMuVMMHeadless.exe']:
+                        pids_after.add(proc.info['pid'])
+                except:
+                    pass
+            
+            # 新增的PID就是当前模拟器的PID
+            emulator_pids = list(pids_after - pids_before)
+            
+            if not emulator_pids:
+                self._log(f"⚠️ {log_prefix} 未找到新增PID，将监听所有MuMu进程")
+                emulator_pids = list(pids_after)  # fallback: 使用所有PID
+            else:
+                self._log(f"✓ {log_prefix} 找到新增 PID: {emulator_pids}")
+            
+            # 启动APP
+            self._log(f"▶️ {log_prefix} 正在启动APP...")
+            if not self.launch_app(mm):
+                self._log(f"❌ {log_prefix} APP启动失败")
+                return False, "APP运行失败"
+            
+            # 添加当前模拟器进程到监听列表
+            self._log(f"📡 {log_prefix} 添加PID监听: {emulator_pids}")
             for pid in emulator_pids:
-                service.deviceInfo_by_pid.pop(pid, None)
-        
-        # 等待抓包
-        self._log(f"📶 {log_prefix} 开始抓包 (监听PID: {emulator_pids})...")
-        captured_device_info = None
-        
-        for i in range(30):  # 30
-            if self.end:  # 检查是否被停止
-                break
+                service.app.process_add_pid(pid)
             
-            # 点击界面
-            mm.adb.click(176, 458)
+            time.sleep(0.5)  # 等待PID监听生效
             
-            # 每3秒输出一次点击日志
-            if i == 0 or i % 3 == 0:
-                self._log(f"  👆 {log_prefix} 点击界面触发请求 (第{i+1}次, 坐标:176,458)")
-            
-            time.sleep(1)
-            
-            # 检查是否有任何一个PID对应的数据被捕获
+            # 清空该PID的旧数据
             with service.deviceInfo_lock:
                 for pid in emulator_pids:
-                    if pid in service.deviceInfo_by_pid:
-                        captured_device_info = service.deviceInfo_by_pid[pid]
-                        # 删除已使用的数据
-                        del service.deviceInfo_by_pid[pid]
-                        self._log(f"✅ {log_prefix} 抓包成功！(PID: {pid}, 耗时: {i+1}秒)")
-                        break
+                    service.deviceInfo_by_pid.pop(pid, None)
             
-            if captured_device_info:
-                break
+            # 等待抓包
+            self._log(f"📶 {log_prefix} 开始抓包 (监听PID: {emulator_pids})...")
+            captured_device_info = None
             
-            # 每5秒输出一次进度
-            if i > 0 and i % 5 == 0:
-                self._log(f"  📊 {log_prefix} 抓包中... (已等待{i}秒/共20秒)")
-        
-        # 移除PID监听
-        self._log(f"🔕 {log_prefix} 移除PID监听: {emulator_pids}")
-        for pid in emulator_pids:
-            service.app.process_del_pid(pid)
-        
-        if not captured_device_info:
-            # 20秒后仍未抓到包
-            self._log(f"⚠️ {log_prefix} 20秒内未抓到包，放弃当前模拟器")
-            self.shutdown_del(mm)
-            return False, "抓包超时"
+            # 添加随机初始延迟，让不同窗口的点击时间错开
+            import random
+            initial_offset = random.uniform(0, 0.5)  # 0-0.5秒随机延迟
+            time.sleep(initial_offset)
+            
+            for i in range(30):  # 30
+                if self.end:  # 检查是否被停止
+                    self._log(f"⚠️ {log_prefix} 任务被中止(抓包阶段)")
+                    return False, "任务被中止"
+                
+                # 点击界面（添加异常处理，避免卡住）
+                try:
+                    mm.adb.click(176, 458)
+                    # 每3秒输出一次点击日志
+                    if i == 0 or i % 3 == 0:
+                        self._log(f"  👆 {log_prefix} 点击界面触发请求 (第{i+1}次, 坐标:176,458)")
+                except Exception as e:
+                    self._log(f"  ⚠️ {log_prefix} 点击失败(第{i+1}次): {e}")
+                    # 点击失败不影响继续，可能之前已经触发过请求了
+                
+                # 增加点击间隔到1.5秒，降低并发压力
+                time.sleep(1.5)
+                
+                # 检查是否有任何一个PID对应的数据被捕获
+                with service.deviceInfo_lock:
+                    for pid in emulator_pids:
+                        if pid in service.deviceInfo_by_pid:
+                            captured_device_info = service.deviceInfo_by_pid[pid]
+                            # 删除已使用的数据
+                            del service.deviceInfo_by_pid[pid]
+                            self._log(f"✅ {log_prefix} 抓包成功！(PID: {pid}, 耗时: {i+1}秒)")
+                            break
+                
+                if captured_device_info:
+                    break
+                
+                # 每5秒输出一次进度
+                if i > 0 and i % 3 == 0:  # 因为间隔是1.5秒，所以每3次约等于5秒
+                    elapsed = int((i + 1) * 1.5)
+                    self._log(f"  📊 {log_prefix} 抓包中... (已等待约{elapsed}秒/共45秒)")
+            
+            # 移除PID监听
+            self._log(f"🔕 {log_prefix} 移除PID监听: {emulator_pids}")
+            for pid in emulator_pids:
+                service.app.process_del_pid(pid)
+            
+            if not captured_device_info:
+                # 45秒后仍未抓到包
+                self._log(f"⚠️ {log_prefix} 45秒内未抓到包，放弃当前模拟器")
+                return False, "抓包超时"
 
-        # 在锁外关闭模拟器，避免阻塞其他线程
-        self._log(f"🧹 {log_prefix} 正在清理模拟器...")
-        self.shutdown_del(mm)
-        self._log(f"✅ {log_prefix} 任务完成")
-        return True, "运行完成"
+            # 抓包成功
+            self._log(f"✅ {log_prefix} 任务完成")
+            return True, "运行完成"
+            
+        finally:
+            # 无论如何都要清理模拟器
+            if mm is not None:
+                log_prefix = f"[窗口{worker_id}]" if worker_id else ""
+                self._log(f"🧹 {log_prefix} 正在清理模拟器...")
+                try:
+                    self.shutdown_del(mm)
+                    self._log(f"✓ {log_prefix} 模拟器已清理")
+                except Exception as e:
+                    self._log(f"❌ {log_prefix} 清理模拟器失败: {e}")
 
     def batch_generate_worker(self, worker_id):
         """

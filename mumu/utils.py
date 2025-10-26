@@ -75,7 +75,7 @@ class utils:
             print(command_extend)
             result = subprocess.run(command_extend, shell=False, check=False, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE,
-                                    encoding='utf-8')
+                                    encoding='utf-8', timeout=10)  # 添加10秒超时
 
             ret_code = result.returncode
             retval = result.stdout
@@ -84,6 +84,10 @@ class utils:
 
             return ret_code, retval
 
+        except subprocess.TimeoutExpired as e:
+            # 超时异常
+            print(f"⚠️ 命令执行超时(10秒): {command_extend}")
+            return -1, f"Timeout: {str(e)}"
         except subprocess.CalledProcessError as e:
             ret_code = e.returncode
             retval = e.stderr
