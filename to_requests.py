@@ -92,6 +92,29 @@ class Watch:
         if self.task_thread and self.task_thread.isRunning():
             self.log_fun("⚠️ 任务正在运行中，请勿重复启动")
             return
+        
+        # 调试信息：显示可用的用户和设备数量
+        self.log_fun(f"🔍 可用账号数: {len(self.users)} (过滤后)")
+        self.log_fun(f"🔍 可用设备数: {len(self.devices)} (过滤后)")
+        self.log_fun(f"🔍 操作倍数: {self.Multiple_num}")
+        
+        # 检查直播间信息
+        if not self.info:
+            self.log_fun("❌ 直播间信息获取失败，无法创建任务")
+            return
+        
+        account_id = self.info.get("accountId", "")
+        live_id = self.info.get("liveId", "")
+        topic = self.info.get("topic", "")
+        
+        self.log_fun(f"🔍 直播间信息: accountId={account_id}, liveId={live_id}, topic={topic[:20]}..." if topic else "")
+        
+        if not account_id or not live_id or not topic:
+            self.log_fun(f"❌ 直播间信息不完整，请检查直播间ID是否正确")
+            self.log_fun(f"   - accountId: {'✅' if account_id else '❌ 缺失'}")
+            self.log_fun(f"   - liveId: {'✅' if live_id else '❌ 缺失'}")
+            self.log_fun(f"   - topic: {'✅' if topic else '❌ 缺失'}")
+            return
 
         # 构建任务列表
         tasks = []
@@ -102,20 +125,44 @@ class Watch:
                         "user": user,
                         "device": device,
                         "proxy": self.proxy_value,
-                        "account_id": self.info.get("accountId", ""),
-                        "live_id": self.info.get("liveId", ""),
-                        "topic": self.info.get("topic", ""),
+                        "account_id": account_id,
+                        "live_id": live_id,
+                        "topic": topic,
                     })
 
-        self.log_fun("正在载入代理，任务数量: " + str(len(tasks)))
-
-        proxy = self.get_proxys(len(tasks))
-        if len(proxy) < len(tasks):
-            self.log_fun(f"📋 代理数量过少: {len(proxy)}")
-            return
-
-        for i, task in enumerate(tasks):
-            tasks[i]["proxy"] = proxy[i]
+        self.log_fun(f"正在载入代理，任务数量: {len(tasks)}")
+        
+        # 根据代理配置设置代理
+        if self.proxy_type == "direct" and self.proxy_value:
+            # 直接填写代理模式：每个任务使用相同的代理（支持{{random}}占位符）
+            self.log_fun(f"🔌 使用直接填写代理模式: {self.proxy_value}")
+            for i, task in enumerate(tasks):
+                # 如果代理中包含{{random}}，为每个任务生成不同的随机字符串
+                proxy_with_random = self.proxy_value.replace('{{random}}', generate_random_string())
+                tasks[i]["proxy"] = proxy_with_random
+        elif self.proxy_type == "url" and self.proxy_value:
+            # API URL模式：从URL获取代理列表
+            self.log_fun(f"🔌 使用API代理模式，正在拉取代理...")
+            try:
+                proxies = self.get_proxys(len(tasks))
+                if len(proxies) < len(tasks):
+                    self.log_fun(f"⚠️ 代理数量不足: 需要{len(tasks)}个，实际{len(proxies)}个，将重复使用代理")
+                    # 如果代理不够，循环使用
+                    for i, task in enumerate(tasks):
+                        tasks[i]["proxy"] = proxies[i % len(proxies)]
+                else:
+                    for i, task in enumerate(tasks):
+                        tasks[i]["proxy"] = proxies[i]
+                self.log_fun(f"✅ 已分配 {len(proxies)} 个代理")
+            except Exception as e:
+                self.log_fun(f"❌ 获取代理失败: {str(e)}，将使用直连")
+                for i, task in enumerate(tasks):
+                    tasks[i]["proxy"] = ''
+        else:
+            # 未配置代理，使用直连
+            self.log_fun(f"⚠️ 未配置代理，将使用直连")
+            for i, task in enumerate(tasks):
+                tasks[i]["proxy"] = ''
 
         self.log_fun(f"📋 总任务数: {len(tasks)}")
 

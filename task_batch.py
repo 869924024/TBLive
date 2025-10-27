@@ -65,13 +65,34 @@ class AsyncTaskThread(QThread):
                     success, result = future.result(timeout=30)  # 30秒超时
                     if success:
                         success_count += 1
-                        self.log_signal.emit(f"{completed_count}. ✔ 任务成功")
+                        # 检查是否返回了 role=5
+                        if isinstance(result, dict) and result.get('role') in [5, '5']:
+                            self.log_signal.emit(f"{completed_count}. ✅ 刷量成功 (role=5)")
+                        else:
+                            self.log_signal.emit(f"{completed_count}. ✔ 任务成功")
                     else:
                         fail_count += 1
-                        self.log_signal.emit(f"{completed_count}. ❌ 任务失败: {str(result)}")
+                        # 提取失败原因的关键信息
+                        error_msg = str(result)
+                        if "role=1" in error_msg:
+                            self.log_signal.emit(f"{completed_count}. ⚠️ role=1 (被识别为异常)")
+                        elif "robot" in error_msg:
+                            self.log_signal.emit(f"{completed_count}. ❌ 设备被封禁")
+                        elif "invalid timestamp" in error_msg:
+                            self.log_signal.emit(f"{completed_count}. ❌ 时间戳无效")
+                        elif "请求超时" in error_msg or "timeout" in error_msg.lower():
+                            self.log_signal.emit(f"{completed_count}. ⏱️ 请求超时（代理慢）")
+                        elif "代理" in error_msg or "proxy" in error_msg.lower():
+                            self.log_signal.emit(f"{completed_count}. 🔌 代理连接失败")
+                        elif "算法" in error_msg or "pad block" in error_msg or "Sequence contains" in error_msg:
+                            self.log_signal.emit(f"{completed_count}. 🔧 算法服务错误")
+                        elif "网络" in error_msg or "connection" in error_msg.lower():
+                            self.log_signal.emit(f"{completed_count}. 🌐 网络连接失败")
+                        else:
+                            self.log_signal.emit(f"{completed_count}. ❌ 失败: {error_msg[:50]}")
                 except Exception as e:
                     fail_count += 1
-                    self.log_signal.emit(f"{completed_count}. ❌ 任务异常: {str(e)}")
+                    self.log_signal.emit(f"{completed_count}. ❌ 任务异常: {str(e)[:50]}")
 
                 # 每完成10个任务报告一次进度 (减少UI更新开销)
                 if completed_count % 10 == 0 or completed_count == len(self.tasks):
@@ -113,6 +134,11 @@ class AsyncTaskThread(QThread):
     def _execute_single_task(self, device, user, account_id, live_id, topic, proxy):
         """执行单个任务"""
         try:
+            # 添加随机延迟（10-50ms），避免完全同时发送
+            # 降低延迟可以提高速度，但可能增加被识别的风险
+            import random
+            time.sleep(random.uniform(1, 10))
+            
             return subscribe_live_msg(device, user, account_id, live_id, topic, proxy)
         except Exception as e:
             return False, str(e)

@@ -971,9 +971,9 @@ class TaskPage(QWidget):
             self.parent_window.add_log("⚠️ 验证失败: 没有可用的设备数据，请先生成设备")
             return
 
-        if not proxy_config['value']:
-            self.parent_window.add_log("⚠️ 验证失败: 代理配置不能为空，请填写代理信息")
-            return
+        # if not proxy_config['value']:
+        #     self.parent_window.add_log("⚠️ 验证失败: 代理配置不能为空，请填写代理信息")
+        #     return
 
         if not thread_config['live_id']:
             self.parent_window.add_log("⚠️ 验证失败: 直播间ID不能为空，请填写直播间ID")
