@@ -7,7 +7,6 @@ import os
 from database import save_timestamp
 from model.user import User
 from model.device import Device
-from tools import get_random_gps, get_random_android_device
 import json
 import time
 import urllib.parse
@@ -232,13 +231,12 @@ def call_app_api(
         # 请求头（保持设备指纹参数不变，只添加GPS等辅助参数）
         headers = {
             "Accept-Encoding": "gzip",
-            "user-agent": user_agent,
+            "user-agent": "MTOPSDK%2F3.1.1.7+%28Android%3B10%3BXiaomi%3BMIX+2S%29+DeviceType%28Phone%29",
             "x-app-ver": "10.51.0",
             "x-appkey": "21646297",
             "x-devid": urllib.parse.quote(device.devid),
             "x-extdata": "openappkey%3DDEFAULT_AUTH",
             "x-features": "27",
-            "x-location": urllib.parse.quote(gps_location),  # 添加GPS定位（关键！）
             "x-mini-wua": urllib.parse.quote(sign_data["miniwua"]),
             "x-nq": "WiFi",  # 网络质量
             "x-pv": "6.3",
