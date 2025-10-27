@@ -7,12 +7,14 @@ import os
 from database import save_timestamp
 from model.user import User
 from model.device import Device
+from tools import get_random_gps, get_random_android_device
 import json
 import time
 import urllib.parse
 import hashlib
 import threading
 import requests
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
 
@@ -221,17 +223,26 @@ def call_app_api(
             print(f"❌ 签名失败 [{device.utdid[:16]}...]: {sign_data[:100]}")
             return False, "签名生成失败"
 
-        # 请求头
+        # 生成随机GPS坐标（全国范围，增加真实性）
+        gps_location = get_random_gps("china")
+        
+        # 生成随机Android设备User-Agent（保持SDK版本不变）
+        user_agent = get_random_android_device()
+        
+        # 请求头（保持设备指纹参数不变，只添加GPS等辅助参数）
         headers = {
             "Accept-Encoding": "gzip",
-            "user-agent": "MTOPSDK%2F3.1.1.7+%28Android%3B10%3BXiaomi%3BMIX+2S%29+DeviceType%28Phone%29",
+            "user-agent": user_agent,
             "x-app-ver": "10.51.0",
             "x-appkey": "21646297",
             "x-devid": urllib.parse.quote(device.devid),
             "x-extdata": "openappkey%3DDEFAULT_AUTH",
             "x-features": "27",
+            "x-location": urllib.parse.quote(gps_location),  # 添加GPS定位（关键！）
             "x-mini-wua": urllib.parse.quote(sign_data["miniwua"]),
+            "x-nq": "WiFi",  # 网络质量
             "x-pv": "6.3",
+            "x-region-channel": "CN",  # 地区渠道
             "x-sgext": urllib.parse.quote(sign_data["sgext"]),
             "x-sid": user.sid,
             "x-sign": urllib.parse.quote(sign_data["sign"]),
@@ -242,6 +253,10 @@ def call_app_api(
             "x-utdid": urllib.parse.quote(device.utdid),
             "cookie": user.cookies
         }
+        
+        # 调试：偶尔打印GPS位置
+        if random.randint(1, 50) == 1:
+            print(f"📍 [{device.utdid[:16]}...] GPS: {gps_location}")
 
         # 配置代理
         proxies = None
