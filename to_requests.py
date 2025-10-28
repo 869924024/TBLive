@@ -134,7 +134,7 @@ class Watch:
             
             # 检查设备数量
             if len(self.devices) == 0:
-                err_msg = "❌ 没有可用的设备参数，请检查设备列表或等待6分钟后重试"
+                err_msg = "❌ 没有可用的设备参数，请检查设备列表或等待12小时后重试"
                 print(err_msg)
                 self.log_fun(err_msg)
                 _finish_task(0, 0)

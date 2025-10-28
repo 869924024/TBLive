@@ -2,6 +2,8 @@
 快代理IP池管理器
 自动提取、测试、分配IP代理
 """
+from urllib.parse import urlunparse, urlencode, parse_qs, urlparse
+
 import requests
 import time
 import threading
@@ -50,38 +52,42 @@ class ProxyManager:
         required = math.ceil(total_tasks / self.tasks_per_ip)
         logger.info(f"📊 总任务数: {total_tasks}, 每IP分配: {self.tasks_per_ip}, 需要IP: {required}个")
         return required
-    
+
     def extract_proxies(self, num: int) -> List[str]:
         """
         从快代理提取IP
-        
+
         Args:
             num: 要提取的IP数量
-            
+
         Returns:
             IP列表，格式: ["IP:PORT:USER:PASS", ...]
         """
         try:
-            # 构建API URL（替换num参数）
-            url = self.kdl_api_url.replace(f'num=2', f'num={num}')
-            
+            # 解析URL并更新num参数
+            parsed_url = urlparse(self.kdl_api_url)
+            query_params = parse_qs(parsed_url.query)
+            query_params['num'] = [str(num)]  # 更新或添加num参数
+            new_query = urlencode(query_params, doseq=True)
+            url = urlunparse(parsed_url._replace(query=new_query))
+
             logger.info(f"🔌 正在从快代理提取 {num} 个IP...")
             response = requests.get(url, timeout=10)
-            
+
             if response.status_code != 200:
                 logger.error(f"❌ 提取IP失败: HTTP {response.status_code}")
                 return []
-            
+
             # 解析返回的IP列表（格式：IP:PORT:USER:PASS，每行一个）
             text = response.text.strip()
             if not text:
                 logger.error("❌ 提取IP失败: 返回为空")
                 return []
-            
+
             proxies = [line.strip() for line in text.split('\n') if line.strip()]
             logger.info(f"✅ 成功提取 {len(proxies)} 个IP")
             return proxies
-            
+
         except Exception as e:
             logger.error(f"❌ 提取IP异常: {e}")
             return []
