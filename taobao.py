@@ -538,18 +538,8 @@ async def call_app_api_prepared_async(
             client_kwargs["proxies"] = proxy_url
         
         async with httpx.AsyncClient(**client_kwargs) as client:
-            # 控制台调试日志（异步路径）
-            try:
-                proxy_info = f"proxy={proxy_url[:30]}..." if proxy_url and len(proxy_url) > 30 else (proxy_url if proxy_url else 'direct')
-                logger.debug(f"[async] send → api={api} v={v} uid={user.uid} devid={device.devid[:10]}.. via={proxy_info} t={seconds}")
-            except Exception:
-                pass
             # 关键：MTOP 期望 application/x-www-form-urlencoded 的 data=data_str 格式
             resp = await client.post(url, headers=headers, data={'data': data_str})
-            try:
-                logger.debug(f"[async] recv ← status={resp.status_code} bytes={len(resp.content)}")
-            except Exception:
-                pass
             
             # 检查HTTP状态码
             if resp.status_code == 503:
@@ -582,27 +572,16 @@ async def call_app_api_prepared_async(
         return False, "无返回值"
     ret_msg = ret[0]
     if "robot::not a normal request" in ret_msg:
-        try:
-            logger.debug("[async] robot::not a normal request")
-        except Exception:
-            pass
         th = threading.Thread(target=save_timestamp, args=(device.devid,))
         th.start()
         return False, "设备被封禁(robot)"
     if "SUCCESS::调用成功" not in ret_msg:
-        try:
-            logger.debug(f"[async] fail ret={ret_msg}")
-        except Exception:
-            pass
         return False, f"调用失败: {ret_msg}"
-    try:
-        if response_str and 'latestSequenceNrs' in response_str:
-            logger.debug("[async] success: 调用成功")
-        else:
-            logger.debug("[async] success: 调用成功，但无 latestSequenceNrs")
-            return False, "无 latestSequenceNrs"
-    except Exception:
-        pass
+    
+    # 检查是否有 latestSequenceNrs（直接返回失败，不打印日志）
+    if 'latestSequenceNrs' not in response_str:
+        return False, "无 latestSequenceNrs"
+    
     return True, data
 
 

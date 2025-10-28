@@ -7,6 +7,7 @@ from model.user import User
 from model.device import Device
 from task_batch import AsyncTaskThread
 from taobao import get_sign, subscribe_live_msg_prepared, subscribe_live_msg_prepared_async
+from proxy_manager import ProxyManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import asyncio
@@ -36,7 +37,7 @@ def get_proxy(url: str, num: int) -> list[str]:
 
 
 class Watch:
-    def __init__(self, cookies=[], devices=[], thread_nums=5, Multiple_num=1, log_fn=None, proxy_type="",
+    def __init__(self, cookies=[], devices=[], thread_nums=5, Multiple_num=1, tasks_per_ip=30, log_fn=None, proxy_type="",
                  proxy_value="", live_id="", burst_mode: str = "preheat"):
         self.users = [User(tools.replace_cookie_item(i, "sgcookie", None)) for i in cookies]
         self.users = filter_available(users=self.users, isaccount=True, interval_hours=10)
@@ -51,6 +52,7 @@ class Watch:
 
         self.thread_nums = thread_nums  # 现在是并发数
         self.Multiple_num = Multiple_num
+        self.tasks_per_ip = tasks_per_ip  # 每个IP分配的任务数
         self.success_num = 0
         self.fail_num = 0
 
@@ -62,6 +64,9 @@ class Watch:
         self.live_id = live_id
         # 突发模式：preheat=预热签名后一次性发送；instant=即时签名+一次性发送
         self.burst_mode = burst_mode if burst_mode in ("preheat", "instant") else "preheat"
+        
+        # 代理池管理器（延迟初始化）
+        self.proxy_manager = None
 
         # 添加网络请求异常处理
         try:
@@ -223,10 +228,34 @@ class Watch:
         self.log_fun(mode_msg)
         logger.info(f"开始执行突发任务，模式: {self.burst_mode}, 用户数: {len(self.users)}, 设备数: {len(self.devices)}, 倍数: {self.Multiple_num}")
 
+        # 初始化代理池管理器（如果是URL类型代理）
+        total_tasks = len(self.users) * len(self.devices) * max(1, self.Multiple_num)
+        if self.proxy_type == "url" and self.proxy_value:
+            try:
+                self.log_fun("=" * 60)
+                self.log_fun("🌐 开始初始化代理池...")
+                self.log_fun(f"📊 总任务数: {total_tasks}")
+                self.log_fun(f"📌 每IP分配任务数: {self.tasks_per_ip}")
+                
+                # 创建代理管理器
+                self.proxy_manager = ProxyManager(self.proxy_value, tasks_per_ip=self.tasks_per_ip)
+                
+                # 初始化代理池（自动提取+测试）
+                if self.proxy_manager.initialize_proxies(total_tasks):
+                    self.proxy_manager.print_distribution_info()
+                    self.log_fun("✅ 代理池初始化成功！")
+                else:
+                    self.log_fun("⚠️ 代理池初始化部分失败，将使用现有可用IP")
+                
+                self.log_fun("=" * 60)
+            except Exception as e:
+                self.log_fun(f"❌ 代理池初始化异常: {e}")
+                self.log_fun("⚠️ 将不使用代理池，改用原始代理方式")
+                self.proxy_manager = None
+
         if self.burst_mode == "instant":
             # 直接即时签名 + 异步突发
             self.log_fun("🚀 突发发送开始（instant：签名+发送全部瞬发）...")
-            total_tasks = len(self.users) * len(self.devices) * max(1, self.Multiple_num)
             self.log_fun(f"📊 预计任务总数: {total_tasks}")
 
             async def _burst_instant():
@@ -236,7 +265,7 @@ class Watch:
                 completed = 0
                 start_ts = time.time()
 
-                async def _sign_then_shoot(u, d):
+                async def _sign_then_shoot(u, d, task_index):
                     import json as _json, hashlib as _hashlib
                     now_ms = int(time.time() * 1000)
                     ext = {
@@ -283,14 +312,22 @@ class Watch:
                         logger.error(f"签名失败: 用户 {u.uid}, 设备 {d.utdid}")
                         return False, "签名失败"
 
+                    # 获取代理（使用代理池或原始代理）
+                    if self.proxy_manager:
+                        proxy = self.proxy_manager.get_proxy_for_task(task_index)
+                    else:
+                        proxy = self.proxy_value
+                    
                     # 异步发送
-                    return await subscribe_live_msg_prepared_async(d, u, data_str, self.proxy_value, t_seconds, sign_data)
+                    return await subscribe_live_msg_prepared_async(d, u, data_str, proxy, t_seconds, sign_data)
 
                 tasks = []
+                task_index = 0
                 for u in self.users:
                     for d in self.devices:
                         for _ in range(max(1, self.Multiple_num)):
-                            tasks.append(_sign_then_shoot(u, d))
+                            tasks.append(_sign_then_shoot(u, d, task_index))
+                            task_index += 1
 
                 for coro in asyncio.as_completed(tasks):
                     ok, res = await coro
@@ -464,9 +501,16 @@ class Watch:
                 return ok, res
 
             tasks = []
+            task_index = 0
             for u, d, t_seconds, sign_data, data_str in ready:
                 for _ in range(max(1, self.Multiple_num)):
-                    tasks.append(_shoot(u, d, t_seconds, sign_data, data_str, self.proxy_value))
+                    # 获取代理（使用代理池或原始代理）
+                    if self.proxy_manager:
+                        proxy = self.proxy_manager.get_proxy_for_task(task_index)
+                    else:
+                        proxy = self.proxy_value
+                    tasks.append(_shoot(u, d, t_seconds, sign_data, data_str, proxy))
+                    task_index += 1
 
             send_msg = f"📤 开始发送 {len(tasks)} 个任务..."
             print(send_msg)

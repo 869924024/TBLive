@@ -304,6 +304,22 @@ class AccountPage(QWidget):
         self.multiplier_input.setFixedWidth(120)
         multiplier_layout.addWidget(self.multiplier_input)
         thread_h_layout.addWidget(multiplier_frame)
+        
+        # 每IP分配任务数配置
+        tasks_per_ip_frame = QFrame()
+        tasks_per_ip_frame.setFrameStyle(QFrame.NoFrame)
+        tasks_per_ip_layout = QVBoxLayout(tasks_per_ip_frame)
+        tasks_per_ip_layout.setContentsMargins(0, 0, 0, 0)
+        tasks_per_ip_layout.setSpacing(5)
+
+        tasks_per_ip_label = BodyLabel("每IP分配任务:")
+        tasks_per_ip_layout.addWidget(tasks_per_ip_label)
+        self.tasks_per_ip_input = LineEdit()
+        self.tasks_per_ip_input.setPlaceholderText("默认：30")
+        self.tasks_per_ip_input.setText("30")  # 默认值为30
+        self.tasks_per_ip_input.setFixedWidth(120)
+        tasks_per_ip_layout.addWidget(self.tasks_per_ip_input)
+        thread_h_layout.addWidget(tasks_per_ip_frame)
 
         liveId_frame = QFrame()
         liveId_frame.setFrameStyle(QFrame.NoFrame)
@@ -324,7 +340,10 @@ class AccountPage(QWidget):
         card_layout.addLayout(thread_h_layout)
 
         # 提示信息
-        tip_label = CaptionLabel(f"提示：线程池大小建议设置为CPU核心数*2({cpu_cores})，操作倍数控制每个任务的执行次数")
+        tip_label = CaptionLabel(
+            f"提示：线程池大小建议设置为CPU核心数*2({cpu_cores})，操作倍数控制每个任务的执行次数\n"
+            f"每IP分配任务数：控制代理IP的使用（例如30表示每个IP处理30个任务，系统会自动计算并提取所需IP数量）"
+        )
         tip_label.setWordWrap(True)
         card_layout.addWidget(tip_label)
 
@@ -342,17 +361,23 @@ class AccountPage(QWidget):
             multiplier = int(self.multiplier_input.text().strip())
             if multiplier < 1:
                 multiplier = 1  # 默认值为1
-
+            
+            # 获取每IP分配任务数
+            tasks_per_ip = int(self.tasks_per_ip_input.text().strip())
+            if tasks_per_ip < 1:
+                tasks_per_ip = 30  # 默认值为30
 
             return {
                 'pool_size': pool_size,
                 'multiplier': multiplier,
+                'tasks_per_ip': tasks_per_ip,
                 "live_id": self.liveId_input.text().strip()
             }
         except ValueError:
             return {
                 'pool_size': multiprocessing.cpu_count(),  # 如果输入无效，返回CPU核心数
                 'multiplier': 1,  # 默认倍数为1
+                'tasks_per_ip': 30,  # 默认每IP30个任务
                 "live_id": ""
             }
 
@@ -1006,6 +1031,7 @@ class TaskPage(QWidget):
                 devices=devices,
                 thread_nums=thread_config['pool_size'],
                 Multiple_num=thread_config['multiplier'],
+                tasks_per_ip=thread_config['tasks_per_ip'],  # 添加每IP分配任务数
                 live_id=thread_config['live_id'],
                 log_fn=self.parent_window.add_log,
                 proxy_type=proxy_config['type'],
