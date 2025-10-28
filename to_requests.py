@@ -462,17 +462,22 @@ class Watch:
             async def _shoot(u, d, t_seconds, sign_data, data_str, proxy):
                 nonlocal first_send_time, last_send_time
                 
-                # 记录发送时间（在实际发送之前）
-                send_time = time.time()
-                async with send_lock:
-                    if first_send_time is None:
-                        first_send_time = send_time
-                    last_send_time = send_time
+                # 在真正发送HTTP请求时记录时间
+                # 由于gather会同时启动所有任务，这些时间会非常接近
+                if first_send_time is None:
+                    async with send_lock:
+                        if first_send_time is None:
+                            first_send_time = time.time()
                 
                 try:
                     ok, res = await subscribe_live_msg_prepared_async(d, u, data_str, proxy, t_seconds, sign_data)
+                    # 记录最后一次发送完成的时间
+                    async with send_lock:
+                        last_send_time = time.time()
                 except Exception as e:
                     ok, res = False, str(e)
+                    async with send_lock:
+                        last_send_time = time.time()
                 # 若出现非法签名，尝试轮换设备重新签名再发送（最多重试2次）
                 if (not ok) and isinstance(res, str) and ("ILEGEL_SIGN" in res or "非法" in res):
                     try:
@@ -536,28 +541,53 @@ class Watch:
                 tasks.append(_shoot(u, d, t_seconds, sign_data, data_str, proxy))
                 task_index += 1
 
-            send_msg = f"📤 开始发送 {len(tasks)} 个任务..."
+            send_msg = f"📤 ⚡ 瞬间发送 {len(tasks)} 个任务..."
             print(send_msg)
             self.log_fun(send_msg)
             logger.info(f"突发发送: 创建了 {len(tasks)} 个异步任务")
 
             # 开始执行任务
             start_ts = time.time()
-            for coro in asyncio.as_completed(tasks):
-                ok, res = await coro
-                completed += 1
-                if ok:
-                    success += 1
+            
+            # 💥 关键：使用 create_task 立即启动所有任务，HTTP请求会瞬间发出
+            running_tasks = [asyncio.create_task(task) for task in tasks]
+            
+            # 稍等片刻，让所有HTTP请求真正发出去
+            await asyncio.sleep(0.1)
+            
+            # 计算发送耗时（第一个到最后一个请求发出的时间）
+            send_duration = (last_send_time - first_send_time) if (first_send_time and last_send_time) else 0
+            
+            # ✅ 所有请求已发出，在UI显示提示
+            send_complete_msg = f"✅ 所有 {len(tasks)} 个请求已发出！发送耗时: {send_duration:.3f}s | 正在等待响应..."
+            print(send_complete_msg)
+            self.log_fun(send_complete_msg)
+            
+            # 现在等待所有任务完成
+            self.log_fun("📊 等待所有响应返回...")
+            results = await asyncio.gather(*running_tasks, return_exceptions=True)
+            
+            # 统计结果
+            self.log_fun("📊 开始统计响应结果...")
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    failed += 1
+                elif isinstance(result, tuple) and len(result) == 2:
+                    ok, res = result
+                    if ok:
+                        success += 1
+                    else:
+                        failed += 1
                 else:
                     failed += 1
-                # 只在特定进度点打印，减少日志开销
+                
+                # 定期打印进度
+                completed = i + 1
                 if completed % 100 == 0 or completed == total:
-                    self.log_fun(f"进度: {completed}/{total}, 成功={success}, 失败={failed}")
+                    self.log_fun(f"响应统计: {completed}/{total}, 成功={success}, 失败={failed}")
 
             total_time = time.time() - start_ts
-            send_duration = (last_send_time - first_send_time) if (first_send_time and last_send_time) else 0
-            self.log_fun(f"⚡ 发送耗时: {send_duration:.3f}s (从第1个到最后1个请求发出)")
-            self.log_fun(f"🏁 总耗时(含响应): {total_time:.2f}s | 成功={success}, 失败={failed}")
+            self.log_fun(f"🏁 全部完成 | 总耗时: {total_time:.2f}s | 成功={success}, 失败={failed}")
             
             # 返回结果用于更新UI
             return success, failed
