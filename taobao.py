@@ -538,8 +538,7 @@ async def call_app_api_prepared_async(
                 max_connections=10000,        # 最大连接数（支持超大并发）
                 max_keepalive_connections=5000, # 最大保持活动连接数
                 keepalive_expiry=30.0        # 连接保持时间（秒）
-            ),
-            "http2": True  # 启用HTTP/2，提升性能
+            )
         }
         if proxy_url:
             client_kwargs["proxies"] = proxy_url
