@@ -531,8 +531,14 @@ async def call_app_api_prepared_async(
 
     try:
         # httpx.AsyncClient 代理参数需要特殊处理
+        # 增加连接池配置，提高并发能力
         client_kwargs = {
-            "timeout": httpx.Timeout(15.0, connect=10.0)
+            "timeout": httpx.Timeout(15.0, connect=10.0),
+            "limits": httpx.Limits(
+                max_connections=1000,        # 最大连接数
+                max_keepalive_connections=500, # 最大保持活动连接数
+                keepalive_expiry=30.0        # 连接保持时间（秒）
+            )
         }
         if proxy_url:
             client_kwargs["proxies"] = proxy_url

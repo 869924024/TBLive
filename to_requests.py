@@ -263,9 +263,14 @@ class Watch:
                 success = 0
                 failed = 0
                 completed = 0
-                start_ts = time.time()
+                
+                # 用于记录发送耗时的变量
+                first_send_time = None
+                last_send_time = None
+                send_lock = asyncio.Lock()
 
                 async def _sign_then_shoot(u, d, task_index):
+                    nonlocal first_send_time, last_send_time
                     import json as _json, hashlib as _hashlib
                     now_ms = int(time.time() * 1000)
                     ext = {
@@ -309,7 +314,6 @@ class Watch:
                         lambda: get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str, t_seconds)
                     )
                     if not ok_sign or not isinstance(sign_data, dict):
-                        logger.error(f"签名失败: 用户 {u.uid}, 设备 {d.utdid}")
                         return False, "签名失败"
 
                     # 获取代理（使用代理池或原始代理）
@@ -317,6 +321,13 @@ class Watch:
                         proxy = self.proxy_manager.get_proxy_for_task(task_index)
                     else:
                         proxy = self.proxy_value
+                    
+                    # 记录第一次和最后一次发送时间
+                    send_time = time.time()
+                    async with send_lock:
+                        if first_send_time is None:
+                            first_send_time = send_time
+                        last_send_time = send_time
                     
                     # 异步发送
                     return await subscribe_live_msg_prepared_async(d, u, data_str, proxy, t_seconds, sign_data)
@@ -329,21 +340,23 @@ class Watch:
                             tasks.append(_sign_then_shoot(u, d, task_index))
                             task_index += 1
 
+                # 开始执行任务
+                start_ts = time.time()
                 for coro in asyncio.as_completed(tasks):
                     ok, res = await coro
                     completed += 1
                     if ok:
                         success += 1
-                        self.log_fun(f"{completed}. ✅ 刷量成功")
                     else:
                         failed += 1
-                        error_detail = str(res) if res else "未知错误"
-                        self.log_fun(f"{completed}. ❌ 失败: {error_detail[:100]}")
-                    if completed % 10 == 0 or completed == total:
+                    # 只在特定进度点打印，减少日志开销
+                    if completed % 100 == 0 or completed == total:
                         self.log_fun(f"进度: {completed}/{total}, 成功={success}, 失败={failed}")
 
                 total_time = time.time() - start_ts
-                self.log_fun(f"🏁 突发发送完成: 总计={total}, 成功={success}, 失败={failed}, 耗时={total_time:.2f}s")
+                send_duration = (last_send_time - first_send_time) if (first_send_time and last_send_time) else 0
+                self.log_fun(f"⚡ 发送耗时: {send_duration:.3f}s (从第1个到最后1个请求发出)")
+                self.log_fun(f"🏁 总耗时(含响应): {total_time:.2f}s | 成功={success}, 失败={failed}")
                 return success, failed
 
             try:
@@ -435,14 +448,27 @@ class Watch:
         print(burst_start)
         self.log_fun(burst_start)
 
-        async def _burst_async():
-            total = len(ready) * max(1, self.Multiple_num)
+        async def _burst_preheat():
+            total = len(ready)
             success = 0
             failed = 0
             completed = 0
-            start_ts = time.time()
+            
+            # 用于记录发送耗时的变量
+            first_send_time = None
+            last_send_time = None
+            send_lock = asyncio.Lock()
 
             async def _shoot(u, d, t_seconds, sign_data, data_str, proxy):
+                nonlocal first_send_time, last_send_time
+                
+                # 记录发送时间（在实际发送之前）
+                send_time = time.time()
+                async with send_lock:
+                    if first_send_time is None:
+                        first_send_time = send_time
+                    last_send_time = send_time
+                
                 try:
                     ok, res = await subscribe_live_msg_prepared_async(d, u, data_str, proxy, t_seconds, sign_data)
                 except Exception as e:
@@ -490,7 +516,6 @@ class Watch:
                         t2 = str(int(time.time()))
                         ok_sign, sd2 = get_sign(nd, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data2, t2)
                         if ok_sign and isinstance(sd2, dict):
-                            self.log_fun(f"🔁 设备轮换重试 step={step} devid={nd.devid[:8]}…")
                             try:
                                 ok2, res2 = await subscribe_live_msg_prepared_async(nd, u, data2, proxy, t2, sd2)
                             except Exception as e2:
@@ -503,51 +528,43 @@ class Watch:
             tasks = []
             task_index = 0
             for u, d, t_seconds, sign_data, data_str in ready:
-                for _ in range(max(1, self.Multiple_num)):
-                    # 获取代理（使用代理池或原始代理）
-                    if self.proxy_manager:
-                        proxy = self.proxy_manager.get_proxy_for_task(task_index)
-                    else:
-                        proxy = self.proxy_value
-                    tasks.append(_shoot(u, d, t_seconds, sign_data, data_str, proxy))
-                    task_index += 1
+                # 获取代理（使用代理池或原始代理）
+                if self.proxy_manager:
+                    proxy = self.proxy_manager.get_proxy_for_task(task_index)
+                else:
+                    proxy = self.proxy_value
+                tasks.append(_shoot(u, d, t_seconds, sign_data, data_str, proxy))
+                task_index += 1
 
             send_msg = f"📤 开始发送 {len(tasks)} 个任务..."
             print(send_msg)
             self.log_fun(send_msg)
             logger.info(f"突发发送: 创建了 {len(tasks)} 个异步任务")
 
+            # 开始执行任务
+            start_ts = time.time()
             for coro in asyncio.as_completed(tasks):
                 ok, res = await coro
                 completed += 1
                 if ok:
                     success += 1
-                    succ_msg = f"{completed}. ✅ 刷量成功"
-                    print(succ_msg)
-                    self.log_fun(succ_msg)
                 else:
                     failed += 1
-                    # 确保错误信息不为空
-                    error_detail = str(res) if res else "未知错误"
-                    fail_msg = f"{completed}. ❌ 失败: {error_detail[:100]}"
-                    print(fail_msg)
-                    self.log_fun(fail_msg)
-                if completed % 10 == 0 or completed == total:
-                    prog_msg = f"进度: {completed}/{total}, 成功={success}, 失败={failed}"
-                    print(prog_msg)
-                    self.log_fun(prog_msg)
+                # 只在特定进度点打印，减少日志开销
+                if completed % 100 == 0 or completed == total:
+                    self.log_fun(f"进度: {completed}/{total}, 成功={success}, 失败={failed}")
 
             total_time = time.time() - start_ts
-            finish_msg = f"🏁 突发发送完成: 总计={total}, 成功={success}, 失败={failed}, 耗时={total_time:.2f}s"
-            print(finish_msg)
-            self.log_fun(finish_msg)
+            send_duration = (last_send_time - first_send_time) if (first_send_time and last_send_time) else 0
+            self.log_fun(f"⚡ 发送耗时: {send_duration:.3f}s (从第1个到最后1个请求发出)")
+            self.log_fun(f"🏁 总耗时(含响应): {total_time:.2f}s | 成功={success}, 失败={failed}")
             
             # 返回结果用于更新UI
             return success, failed
 
         # 在普通线程环境中运行事件循环
         try:
-            result = asyncio.run(_burst_async())
+            result = asyncio.run(_burst_preheat())
             if result and len(result) == 2:
                 _finish_task(result[0], result[1])
             else:
@@ -556,7 +573,7 @@ class Watch:
             # 如果已有事件循环（极少数情况），fallback到新loop
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(_burst_async())
+            result = loop.run_until_complete(_burst_preheat())
             loop.close()
             if result and len(result) == 2:
                 _finish_task(result[0], result[1])
