@@ -221,12 +221,6 @@ def call_app_api(
             # 简化错误消息，不返回算法服务的详细错误
             print(f"❌ 签名失败 [{device.utdid[:16]}...]: {sign_data[:100]}")
             return False, "签名生成失败"
-
-        # 生成随机GPS坐标（全国范围，增加真实性）
-        gps_location = get_random_gps("china")
-        
-        # 生成随机Android设备User-Agent（保持SDK版本不变）
-        user_agent = get_random_android_device()
         
         # 请求头（保持设备指纹参数不变，只添加GPS等辅助参数）
         headers = {
@@ -251,10 +245,6 @@ def call_app_api(
             "x-utdid": urllib.parse.quote(device.utdid),
             "cookie": user.cookies
         }
-        
-        # 调试：偶尔打印GPS位置
-        if random.randint(1, 50) == 1:
-            print(f"📍 [{device.utdid[:16]}...] GPS: {gps_location}")
 
         # 配置代理
         proxies = None

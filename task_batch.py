@@ -75,7 +75,7 @@ class AsyncTaskThread(QThread):
                         # 提取失败原因的关键信息
                         error_msg = str(result)
                         if "role=1" in error_msg:
-                            self.log_signal.emit(f"{completed_count}. ⚠️ role=1 (被识别为异常)")
+                            self.log_signal.emit(f"{completed_count}. ⚠️ 被识别为异常")
                         elif "robot" in error_msg:
                             self.log_signal.emit(f"{completed_count}. ❌ 设备被封禁")
                         elif "invalid timestamp" in error_msg:
@@ -134,11 +134,6 @@ class AsyncTaskThread(QThread):
     def _execute_single_task(self, device, user, account_id, live_id, topic, proxy):
         """执行单个任务"""
         try:
-            # 添加随机延迟（10-50ms），避免完全同时发送
-            # 降低延迟可以提高速度，但可能增加被识别的风险
-            import random
-            time.sleep(random.uniform(1, 10))
-            
             return subscribe_live_msg(device, user, account_id, live_id, topic, proxy)
         except Exception as e:
             return False, str(e)
