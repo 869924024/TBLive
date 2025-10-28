@@ -83,6 +83,22 @@ class AccountPage(QWidget):
         thread_card = self.create_thread_card()
         config_h_layout.addWidget(thread_card)
 
+        # 突发模式选择
+        burst_card = CardWidget(self)
+        burst_layout = QVBoxLayout(burst_card)
+        burst_layout.setContentsMargins(20, 20, 20, 20)
+        burst_layout.setSpacing(10)
+
+        burst_title = SubtitleLabel("⚡ 突发模式")
+        burst_layout.addWidget(burst_title)
+
+        self.burst_mode_combo = ComboBox()
+        self.burst_mode_combo.addItems(["preheat (预热后突发)", "instant (即时签名突发)"])
+        self.burst_mode_combo.setCurrentIndex(0)
+        burst_layout.addWidget(self.burst_mode_combo)
+
+        config_h_layout.addWidget(burst_card)
+
         layout.addLayout(config_h_layout)
 
     def create_proxy_card(self):
@@ -994,6 +1010,13 @@ class TaskPage(QWidget):
                 log_fn=self.parent_window.add_log,
                 proxy_type=proxy_config['type'],
                 proxy_value=proxy_config['value'],
+                burst_mode=(
+                    "preheat"
+                    if (hasattr(self.parent_window, 'account_page')
+                        and hasattr(self.parent_window.account_page, 'burst_mode_combo')
+                        and self.parent_window.account_page.burst_mode_combo.currentIndex() == 0)
+                    else "instant"
+                ),
             )
         except Exception as e:
             import traceback
@@ -1027,6 +1050,9 @@ class TaskPage(QWidget):
 
 class MainWindow(FluentWindow):
     """主窗口"""
+    
+    # 定义信号用于跨线程传递日志
+    log_signal = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -1034,6 +1060,10 @@ class MainWindow(FluentWindow):
         self.resize(1200, 800)
         setTheme(Theme.AUTO)
         self.navigationInterface.setReturnButtonVisible(False)
+        
+        # 连接信号到槽函数
+        self.log_signal.connect(self.add_log_th)
+        
         self.setup_ui()
 
     def closeEvent(self, event):
@@ -1083,7 +1113,8 @@ class MainWindow(FluentWindow):
         self.task_page.log_text.append(message)
 
     def add_log(self, message):
-        QTimer.singleShot(0, lambda: self.add_log_th(message))
+        # 使用信号来跨线程传递日志，线程安全
+        self.log_signal.emit(message)
 
     def save_old_logs(self, log_lines):
         """保存旧日志到文件"""
