@@ -530,7 +530,14 @@ async def call_app_api_prepared_async(
     url = f"https://guide-acs.m.taobao.com/gw/{api}/{v}/"
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=10.0), proxies=proxy_url) as client:
+        # httpx.AsyncClient 代理参数需要特殊处理
+        client_kwargs = {
+            "timeout": httpx.Timeout(15.0, connect=10.0)
+        }
+        if proxy_url:
+            client_kwargs["proxies"] = proxy_url
+        
+        async with httpx.AsyncClient(**client_kwargs) as client:
             # 控制台调试日志（异步路径）
             try:
                 proxy_info = f"proxy={proxy_url[:30]}..." if proxy_url and len(proxy_url) > 30 else (proxy_url if proxy_url else 'direct')
