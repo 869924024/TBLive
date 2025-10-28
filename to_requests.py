@@ -569,22 +569,37 @@ class Watch:
             
             # 统计结果
             self.log_fun("📊 开始统计响应结果...")
+            fail_reasons = {}  # 统计失败原因
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
                     failed += 1
+                    error_msg = str(result)[:50]
+                    fail_reasons[error_msg] = fail_reasons.get(error_msg, 0) + 1
                 elif isinstance(result, tuple) and len(result) == 2:
                     ok, res = result
                     if ok:
                         success += 1
                     else:
                         failed += 1
+                        # 记录失败原因
+                        error_msg = str(res)[:50] if res else "未知错误"
+                        fail_reasons[error_msg] = fail_reasons.get(error_msg, 0) + 1
                 else:
                     failed += 1
+                    fail_reasons["返回格式错误"] = fail_reasons.get("返回格式错误", 0) + 1
                 
                 # 定期打印进度
                 completed = i + 1
                 if completed % 100 == 0 or completed == total:
                     self.log_fun(f"响应统计: {completed}/{total}, 成功={success}, 失败={failed}")
+            
+            # 显示失败原因统计
+            if fail_reasons:
+                self.log_fun("=" * 60)
+                self.log_fun("📋 失败原因统计:")
+                for reason, count in sorted(fail_reasons.items(), key=lambda x: x[1], reverse=True):
+                    self.log_fun(f"  • {reason}: {count}次")
+                self.log_fun("=" * 60)
 
             total_time = time.time() - start_ts
             self.log_fun(f"🏁 全部完成 | 总耗时: {total_time:.2f}s | 成功={success}, 失败={failed}")
