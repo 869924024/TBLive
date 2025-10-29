@@ -37,7 +37,7 @@ def get_proxy(url: str, num: int) -> list[str]:
 
 
 class Watch:
-    def __init__(self, cookies=[], devices=[], thread_nums=5, Multiple_num=1, tasks_per_ip=30, log_fn=None, proxy_type="",
+    def __init__(self, cookies=[], devices=[], thread_nums=5, Multiple_num=1, tasks_per_ip=30, use_device_num=0, log_fn=None, proxy_type="",
                  proxy_value="", live_id="", burst_mode: str = "preheat"):
         self.users = [User(tools.replace_cookie_item(i, "sgcookie", None)) for i in cookies]
         self.users = filter_available(users=self.users, isaccount=True, interval_hours=10)
@@ -48,11 +48,22 @@ class Watch:
             if len(items) >= 5:
                 self.devices.append(Device(items[0], items[1], items[2], items[3], items[4]))
 
-        self.devices = filter_available(devices=self.devices, isaccount=False, interval_hours=10)
+        # 先过滤10小时内使用过的设备
+        available_devices = filter_available(devices=self.devices, isaccount=False, interval_hours=10)
+        total_available = len(available_devices)
+        
+        # 如果指定了使用设备数，限制设备数量
+        if use_device_num > 0 and use_device_num < total_available:
+            self.devices = available_devices[:use_device_num]
+            if log_fn:
+                log_fn(f"🔧 限制使用设备数: {use_device_num} (从 {total_available} 个可用设备中选择)")
+        else:
+            self.devices = available_devices
 
         self.thread_nums = thread_nums  # 现在是并发数
         self.Multiple_num = Multiple_num
         self.tasks_per_ip = tasks_per_ip  # 每个IP分配的任务数
+        self.use_device_num = use_device_num  # 使用设备数
         self.success_num = 0
         self.fail_num = 0
 

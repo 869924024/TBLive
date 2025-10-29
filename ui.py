@@ -366,11 +366,17 @@ class AccountPage(QWidget):
             tasks_per_ip = int(self.tasks_per_ip_input.text().strip())
             if tasks_per_ip < 1:
                 tasks_per_ip = 30  # 默认值为30
+            
+            # 获取使用设备数（0表示全部）
+            use_device_num = int(self.use_device_num_input.text().strip()) if hasattr(self, 'use_device_num_input') else 0
+            if use_device_num < 0:
+                use_device_num = 0  # 负数改为0
 
             return {
                 'pool_size': pool_size,
                 'multiplier': multiplier,
                 'tasks_per_ip': tasks_per_ip,
+                'use_device_num': use_device_num,
                 "live_id": self.liveId_input.text().strip()
             }
         except ValueError:
@@ -580,13 +586,31 @@ class AccountPage(QWidget):
 
         config_h_layout.addWidget(window_num_frame)
 
+        # 使用设备数输入
+        use_device_num_frame = QFrame()
+        use_device_num_frame.setFrameStyle(QFrame.NoFrame)
+        use_device_num_layout = QVBoxLayout(use_device_num_frame)
+        use_device_num_layout.setContentsMargins(0, 0, 0, 0)
+        use_device_num_layout.setSpacing(5)
+
+        use_device_num_label = BodyLabel("使用设备数:")
+        use_device_num_layout.addWidget(use_device_num_label)
+
+        self.use_device_num_input = LineEdit()
+        self.use_device_num_input.setPlaceholderText("0=全部")
+        self.use_device_num_input.setText("0")  # 默认0表示使用全部
+        self.use_device_num_input.setFixedWidth(120)
+        use_device_num_layout.addWidget(self.use_device_num_input)
+
+        config_h_layout.addWidget(use_device_num_frame)
+
         # 添加伸缩空间
         config_h_layout.addStretch()
 
         card_layout.addLayout(config_h_layout)
 
         # 提示信息
-        tip_label = CaptionLabel("提示：通过PID区分不同窗口的流量，所有操作完全并行，互不干扰！窗口数建议2-5个")
+        tip_label = CaptionLabel("提示：使用设备数填0表示使用全部可用设备。填具体数字（如50）表示只使用前50个未封禁的设备参与任务")
         tip_label.setWordWrap(True)
         card_layout.addWidget(tip_label)
 
@@ -1032,6 +1056,7 @@ class TaskPage(QWidget):
                 thread_nums=thread_config['pool_size'],
                 Multiple_num=thread_config['multiplier'],
                 tasks_per_ip=thread_config['tasks_per_ip'],  # 添加每IP分配任务数
+                use_device_num=thread_config.get('use_device_num', 0),  # 添加使用设备数
                 live_id=thread_config['live_id'],
                 log_fn=self.parent_window.add_log,
                 proxy_type=proxy_config['type'],
