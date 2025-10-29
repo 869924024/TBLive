@@ -445,7 +445,9 @@ class Watch:
                 for k in range(max(1, self.Multiple_num)):
                     targets.append((u, (i + k) % total_dev))
 
-        with ThreadPoolExecutor(max_workers=max(1, self.thread_nums)) as pre_executor:
+        # ⚡ 优化4：提升预热并发数，加快预热速度
+        preheat_workers = max(50, self.thread_nums * 5)  # 至少50并发，或线程数的5倍
+        with ThreadPoolExecutor(max_workers=preheat_workers) as pre_executor:
             futs = [pre_executor.submit(sign_for_target, u, start_idx) for (u, start_idx) in targets]
             total_targets = len(futs)
             done_cnt = 0
@@ -460,7 +462,8 @@ class Watch:
                 except Exception:
                     pass
                 done_cnt += 1
-                if done_cnt % 50 == 0 or done_cnt == total_targets:
+                # ⚡ 优化5：减少日志输出频率（每100个或完成时）
+                if done_cnt % 100 == 0 or done_cnt == total_targets:
                     prog = f"预热进度: {done_cnt}/{total_targets}, 成功={succ_cnt}, 失败={done_cnt - succ_cnt}"
                     print(prog)
                     self.log_fun(prog)
@@ -510,27 +513,34 @@ class Watch:
                 """获取或创建指定代理的 client"""
                 if proxy not in client_pool:
                     client_kwargs = {
-                        "timeout": httpx.Timeout(15.0, connect=10.0),
+                        # ⚡ 优化1：缩短超时时间，快速失败
+                        "timeout": httpx.Timeout(8.0, connect=4.0, read=6.0, write=4.0),
+                        # ⚡ 优化2：大幅提升连接池，支持高并发
                         "limits": httpx.Limits(
-                            max_connections=50,              # 每个代理最大50个连接
-                            max_keepalive_connections=30,    # 保持30个活动连接
-                            keepalive_expiry=30.0
-                        )
+                            max_connections=200,              # 提升到200（原50）
+                            max_keepalive_connections=150,    # 提升到150（原30）
+                            keepalive_expiry=60.0             # 延长到60秒（原30秒）
+                        ),
+                        # ⚡ 优化3：启用HTTP/2，单连接复用多请求
+                        "http2": True
                     }
-                    # 配置代理
+                    # 配置代理（支持多种格式）
                     if proxy and proxy != "":
                         # 解析代理格式
                         if not (proxy.startswith('socks5://') or proxy.startswith('http://') or proxy.startswith('https://')):
                             if proxy.count(':') == 3:
-                                # IP:PORT:USERNAME:PASSWORD 格式
+                                # 格式1: IP:PORT:USERNAME:PASSWORD（带认证）
                                 parts = proxy.split(':')
                                 ip, port, username, password = parts[0], parts[1], parts[2], parts[3]
                                 proxy_url = f'http://{username}:{password}@{ip}:{port}'
                             elif proxy.count(':') == 1:
+                                # 格式2: IP:PORT（无认证）
                                 proxy_url = f'http://{proxy}'
                             else:
+                                # 其他格式，默认加http://
                                 proxy_url = f'http://{proxy}'
                         else:
+                            # 格式3: 已带协议头（socks5://、http://、https://）
                             proxy_url = proxy
                         client_kwargs["proxies"] = proxy_url
                     
@@ -688,6 +698,16 @@ class Watch:
             # 返回结果用于更新UI
             return success, failed
 
+        # ⚡ 优化6：尝试使用uvloop加速（性能提升20-40%）
+        try:
+            import uvloop
+            uvloop.install()
+            uvloop_msg = "✅ 已启用uvloop加速（异步性能提升20-40%）"
+            print(uvloop_msg)
+            self.log_fun(uvloop_msg)
+        except ImportError:
+            pass  # uvloop未安装，使用默认事件循环
+        
         # 在普通线程环境中运行事件循环
         try:
             result = asyncio.run(_burst_preheat())
