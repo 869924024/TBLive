@@ -70,14 +70,30 @@ class ProxyManager:
             IP列表，格式: ["IP:PORT:USER:PASS", ...] 或 ["IP:PORT", ...]
         """
         try:
-            # 解析URL并更新num参数
+            # 解析URL并智能更新数量参数（支持多种参数名）
             parsed_url = urlparse(self.kdl_api_url)
             query_params = parse_qs(parsed_url.query)
-            query_params['num'] = [str(num)]  # 更新或添加num参数
+            
+            # 智能识别数量参数名（num, count, number, size等）
+            num_param_names = ['num', 'count', 'number', 'size', 'amount']
+            num_param_key = None
+            
+            # 查找URL中已存在的数量参数
+            for key in num_param_names:
+                if key in query_params:
+                    num_param_key = key
+                    break
+            
+            # 如果找不到，默认使用'num'
+            if num_param_key is None:
+                num_param_key = 'num'
+            
+            # 更新数量参数
+            query_params[num_param_key] = [str(num)]
             new_query = urlencode(query_params, doseq=True)
             url = urlunparse(parsed_url._replace(query=new_query))
 
-            extract_msg = f"🔌 正在从代理API提取 {num} 个IP..."
+            extract_msg = f"🔌 正在从代理API提取 {num} 个IP (参数名: {num_param_key})..."
             logger.info(extract_msg)
             if self.progress_callback:
                 self.progress_callback(extract_msg)
@@ -132,6 +148,8 @@ class ProxyManager:
             except json.JSONDecodeError:
                 # 不是JSON，按纯文本格式解析
                 # 格式2: 每行一个代理（IP:PORT:USER:PASS 或 IP:PORT）
+                # 支持多种分隔符：\n, \r\n, \r
+                text = text.replace('\r\n', '\n').replace('\r', '\n')
                 proxies = [line.strip() for line in text.split('\n') if line.strip()]
                 logger.debug(f"纯文本格式解析: {len(proxies)} 行")
             
