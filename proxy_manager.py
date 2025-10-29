@@ -25,18 +25,20 @@ except ImportError:
 class ProxyManager:
     """代理IP管理器"""
     
-    def __init__(self, kdl_api_url: str, tasks_per_ip: int = 30):
+    def __init__(self, kdl_api_url: str, tasks_per_ip: int = 30, progress_callback=None):
         """
         初始化代理管理器
         
         Args:
             kdl_api_url: 快代理API URL
             tasks_per_ip: 每个IP分配的任务数（默认30）
+            progress_callback: 进度回调函数，接收消息字符串
         """
         self.kdl_api_url = kdl_api_url
         self.tasks_per_ip = tasks_per_ip
         self.proxies: List[str] = []  # 可用的代理列表
         self.proxy_lock = threading.Lock()
+        self.progress_callback = progress_callback  # UI进度回调
         
     def calculate_required_ips(self, total_tasks: int) -> int:
         """
@@ -71,25 +73,41 @@ class ProxyManager:
             new_query = urlencode(query_params, doseq=True)
             url = urlunparse(parsed_url._replace(query=new_query))
 
-            logger.info(f"🔌 正在从快代理提取 {num} 个IP...")
+            extract_msg = f"🔌 正在从快代理提取 {num} 个IP..."
+            logger.info(extract_msg)
+            if self.progress_callback:
+                self.progress_callback(extract_msg)
+            
             response = requests.get(url, timeout=10)
 
             if response.status_code != 200:
-                logger.error(f"❌ 提取IP失败: HTTP {response.status_code}")
+                error_msg = f"❌ 提取IP失败: HTTP {response.status_code}"
+                logger.error(error_msg)
+                if self.progress_callback:
+                    self.progress_callback(error_msg)
                 return []
 
             # 解析返回的IP列表（格式：IP:PORT:USER:PASS，每行一个）
             text = response.text.strip()
             if not text:
-                logger.error("❌ 提取IP失败: 返回为空")
+                error_msg = "❌ 提取IP失败: 返回为空"
+                logger.error(error_msg)
+                if self.progress_callback:
+                    self.progress_callback(error_msg)
                 return []
 
             proxies = [line.strip() for line in text.split('\n') if line.strip()]
-            logger.info(f"✅ 成功提取 {len(proxies)} 个IP")
+            success_msg = f"✅ 成功提取 {len(proxies)} 个IP"
+            logger.info(success_msg)
+            if self.progress_callback:
+                self.progress_callback(success_msg)
             return proxies
 
         except Exception as e:
-            logger.error(f"❌ 提取IP异常: {e}")
+            error_msg = f"❌ 提取IP异常: {e}"
+            logger.error(error_msg)
+            if self.progress_callback:
+                self.progress_callback(error_msg)
             return []
     
     def test_proxy(self, proxy: str, test_url: str = "https://www.taobao.com") -> bool:
@@ -133,13 +151,13 @@ class ProxyManager:
             logger.warning(f"⚠️ 代理测试失败 [{proxy.split(':')[0]}]: {str(e)[:50]}")
             return False
     
-    def test_proxies_batch(self, proxies: List[str], max_workers: int = 10) -> Tuple[List[str], List[str]]:
+    def test_proxies_batch(self, proxies: List[str], max_workers: int = 50) -> Tuple[List[str], List[str]]:
         """
-        批量测试代理（多线程）
+        批量测试代理（多线程并发）
         
         Args:
             proxies: 代理列表
-            max_workers: 最大并发线程数
+            max_workers: 最大并发线程数（默认50，加快测试速度）
             
         Returns:
             (可用代理列表, 失败代理列表)
@@ -149,15 +167,23 @@ class ProxyManager:
         valid_proxies = []
         failed_proxies = []
         
-        logger.info(f"🧪 开始测试 {len(proxies)} 个代理...")
+        total = len(proxies)
+        completed = 0
+        
+        msg = f"🧪 开始并发测试 {total} 个代理（并发数: {max_workers}）..."
+        logger.info(msg)
+        if self.progress_callback:
+            self.progress_callback(msg)
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 提交所有测试任务
+            # 提交所有测试任务（并发执行）
             future_to_proxy = {executor.submit(self.test_proxy, proxy): proxy for proxy in proxies}
             
-            # 收集结果
+            # 收集结果（边测试边统计）
             for future in as_completed(future_to_proxy):
                 proxy = future_to_proxy[future]
+                completed += 1
+                
                 try:
                     is_valid = future.result()
                     if is_valid:
@@ -168,8 +194,19 @@ class ProxyManager:
                 except Exception as e:
                     logger.warning(f"⚠️ 测试异常 [{proxy.split(':')[0]}]: {e}")
                     failed_proxies.append(proxy)
+                
+                # 每测试10个或完成时，报告进度
+                if completed % 10 == 0 or completed == total:
+                    progress_msg = f"   测试进度: {completed}/{total}, ✅可用={len(valid_proxies)}, ❌失败={len(failed_proxies)}"
+                    logger.info(progress_msg)
+                    if self.progress_callback:
+                        self.progress_callback(progress_msg)
         
-        logger.info(f"✅ 测试完成: 可用 {len(valid_proxies)}/{len(proxies)}, 失败 {len(failed_proxies)}")
+        result_msg = f"✅ 测试完成: 可用 {len(valid_proxies)}/{total}, 失败 {len(failed_proxies)}"
+        logger.info(result_msg)
+        if self.progress_callback:
+            self.progress_callback(result_msg)
+        
         return valid_proxies, failed_proxies
     
     def initialize_proxies(self, total_tasks: int, max_retries: int = 3) -> bool:
@@ -197,12 +234,18 @@ class ProxyManager:
             # 第一次提取全部，后续只提取缺失的
             extract_count = required_ips if retry_count == 0 else need_count
             
-            logger.info(f"🔄 第 {retry_count + 1} 次提取 (需要 {need_count} 个)...")
+            extract_msg = f"🔄 第 {retry_count + 1} 次提取 (需要 {need_count} 个)..."
+            logger.info(extract_msg)
+            if self.progress_callback:
+                self.progress_callback(extract_msg)
             
             # 提取IP
             new_proxies = self.extract_proxies(extract_count)
             if not new_proxies:
-                logger.error(f"❌ 第 {retry_count + 1} 次提取失败")
+                fail_msg = f"❌ 第 {retry_count + 1} 次提取失败"
+                logger.error(fail_msg)
+                if self.progress_callback:
+                    self.progress_callback(fail_msg)
                 retry_count += 1
                 time.sleep(2)  # 等待2秒后重试
                 continue
@@ -213,17 +256,26 @@ class ProxyManager:
             
             # 如果还有失败的，记录下来
             if failed_batch:
-                logger.warning(f"⚠️ 本次有 {len(failed_batch)} 个IP不可用")
+                warn_msg = f"⚠️ 本次有 {len(failed_batch)} 个IP不可用"
+                logger.warning(warn_msg)
+                if self.progress_callback:
+                    self.progress_callback(warn_msg)
             
             retry_count += 1
         
         # 检查是否成功
         if len(valid_proxies) >= required_ips:
             self.proxies = valid_proxies[:required_ips]  # 只取需要的数量
-            logger.info(f"✅ 代理池初始化成功！共 {len(self.proxies)} 个可用IP")
+            success_msg = f"✅ 代理池初始化成功！共 {len(self.proxies)} 个可用IP"
+            logger.info(success_msg)
+            if self.progress_callback:
+                self.progress_callback(success_msg)
             return True
         else:
-            logger.error(f"❌ 代理池初始化失败！只获取到 {len(valid_proxies)}/{required_ips} 个可用IP")
+            fail_msg = f"❌ 代理池初始化失败！只获取到 {len(valid_proxies)}/{required_ips} 个可用IP"
+            logger.error(fail_msg)
+            if self.progress_callback:
+                self.progress_callback(fail_msg)
             self.proxies = valid_proxies  # 保存所有可用的
             return False
     

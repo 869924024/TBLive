@@ -237,8 +237,12 @@ class Watch:
                 self.log_fun(f"📊 总任务数: {total_tasks}")
                 self.log_fun(f"📌 每IP分配任务数: {self.tasks_per_ip}")
                 
-                # 创建代理管理器
-                self.proxy_manager = ProxyManager(self.proxy_value, tasks_per_ip=self.tasks_per_ip)
+                # 创建代理管理器（传入进度回调函数，实时显示测试进度）
+                self.proxy_manager = ProxyManager(
+                    self.proxy_value, 
+                    tasks_per_ip=self.tasks_per_ip,
+                    progress_callback=self.log_fun  # UI进度回调
+                )
                 
                 # 初始化代理池（自动提取+测试）
                 if self.proxy_manager.initialize_proxies(total_tasks):
