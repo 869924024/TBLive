@@ -6,7 +6,7 @@ from database import filter_available
 from model.user import User
 from model.device import Device
 from task_batch import AsyncTaskThread
-from taobao import get_sign, subscribe_live_msg_prepared, subscribe_live_msg_prepared_async
+from taobao import get_sign, subscribe_live_msg_prepared, subscribe_live_msg_prepared_async, subscribe_live_msg_prepared_async_with_client
 from proxy_manager import ProxyManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
