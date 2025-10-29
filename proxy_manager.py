@@ -58,12 +58,16 @@ class ProxyManager:
     def extract_proxies(self, num: int) -> List[str]:
         """
         从代理API提取IP
+        
+        支持格式：
+        1. 纯文本格式（每行一个代理）：IP:PORT:USER:PASS 或 IP:PORT
+        2. JSON格式：{"code":"SUCCESS","data":[{"server":"IP:PORT"},...]}
 
         Args:
             num: 要提取的IP数量
 
         Returns:
-            IP列表，格式: ["IP:PORT:USER:PASS", ...]
+            IP列表，格式: ["IP:PORT:USER:PASS", ...] 或 ["IP:PORT", ...]
         """
         try:
             # 解析URL并更新num参数
@@ -90,7 +94,6 @@ class ProxyManager:
                     self.progress_callback(error_msg)
                 return []
 
-            # 解析返回的IP列表（格式：IP:PORT:USER:PASS，每行一个）
             text = response.text.strip()
             logger.debug(f"API返回内容: {text[:200]}...")  # 只显示前200个字符
             
@@ -101,7 +104,44 @@ class ProxyManager:
                     self.progress_callback(error_msg)
                 return []
 
-            proxies = [line.strip() for line in text.split('\n') if line.strip()]
+            proxies = []
+            
+            # 尝试解析为JSON格式
+            try:
+                import json
+                data = json.loads(text)
+                
+                # 检查是否是JSON格式
+                if isinstance(data, dict):
+                    # 格式1: {"code":"SUCCESS","data":[{"server":"IP:PORT"},...]}
+                    if 'data' in data and isinstance(data['data'], list):
+                        for item in data['data']:
+                            if isinstance(item, dict) and 'server' in item:
+                                server = item['server'].strip()
+                                if server:
+                                    proxies.append(server)
+                        
+                        json_msg = f"📊 JSON格式解析: 从data数组提取到 {len(proxies)} 个代理"
+                        logger.info(json_msg)
+                        if self.progress_callback:
+                            self.progress_callback(json_msg)
+                    else:
+                        # 其他JSON格式，尝试通用解析
+                        logger.warning(f"未知的JSON格式，data字段: {data.keys()}")
+                        
+            except json.JSONDecodeError:
+                # 不是JSON，按纯文本格式解析
+                # 格式2: 每行一个代理（IP:PORT:USER:PASS 或 IP:PORT）
+                proxies = [line.strip() for line in text.split('\n') if line.strip()]
+                logger.debug(f"纯文本格式解析: {len(proxies)} 行")
+            
+            if not proxies:
+                error_msg = "❌ 未能解析出任何代理IP"
+                logger.error(error_msg)
+                if self.progress_callback:
+                    self.progress_callback(error_msg)
+                return []
+            
             success_msg = f"✅ 成功提取 {len(proxies)} 个IP (请求{num}个，实际返回{len(proxies)}个)"
             logger.info(success_msg)
             if self.progress_callback:
@@ -120,7 +160,9 @@ class ProxyManager:
         测试单个代理是否可用
         
         Args:
-            proxy: 代理字符串 "IP:PORT:USER:PASS"
+            proxy: 代理字符串，支持两种格式：
+                   - "IP:PORT:USER:PASS" (带认证)
+                   - "IP:PORT" (无认证)
             test_url: 测试URL
             
         Returns:
@@ -129,12 +171,18 @@ class ProxyManager:
         try:
             # 解析代理格式
             parts = proxy.split(':')
-            if len(parts) != 4:
-                logger.warning(f"⚠️ 代理格式错误: {proxy}")
-                return False
             
-            ip, port, username, password = parts
-            proxy_url = f'http://{username}:{password}@{ip}:{port}'
+            if len(parts) == 4:
+                # 格式: IP:PORT:USER:PASS（带认证）
+                ip, port, username, password = parts
+                proxy_url = f'http://{username}:{password}@{ip}:{port}'
+            elif len(parts) == 2:
+                # 格式: IP:PORT（无认证）
+                ip, port = parts
+                proxy_url = f'http://{ip}:{port}'
+            else:
+                logger.warning(f"⚠️ 代理格式错误: {proxy} (应为 IP:PORT 或 IP:PORT:USER:PASS)")
+                return False
             
             # 测试连接（3秒超时）
             response = requests.get(
