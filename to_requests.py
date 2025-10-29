@@ -242,8 +242,14 @@ class Watch:
         self.log_fun(mode_msg)
         logger.info(f"开始执行突发任务，模式: {self.burst_mode}, 用户数: {len(self.users)}, 设备数: {len(self.devices)}, 倍数: {self.Multiple_num}")
 
+        # 计算实际任务数（使用目标设备数，而不是全部设备数）
+        if self.use_device_num > 0:
+            target_device_count = min(self.use_device_num, len(self.all_available_devices))
+        else:
+            target_device_count = len(self.devices)
+        
         # 初始化代理池管理器（如果是URL类型代理）
-        total_tasks = len(self.users) * len(self.devices) * max(1, self.Multiple_num)
+        total_tasks = len(self.users) * target_device_count * max(1, self.Multiple_num)
         if self.proxy_type == "url" and self.proxy_value:
             try:
                 self.log_fun("=" * 60)
