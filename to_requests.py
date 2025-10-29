@@ -52,11 +52,14 @@ class Watch:
         available_devices = filter_available(devices=self.devices, isaccount=False, interval_hours=10)
         total_available = len(available_devices)
         
-        # 如果指定了使用设备数，限制设备数量
+        # 保存所有可用设备（用于预热时自动切换）
+        self.all_available_devices = available_devices
+        
+        # 如果指定了使用设备数，记录但不立即限制（预热后再限制）
         if use_device_num > 0 and use_device_num < total_available:
-            self.devices = available_devices[:use_device_num]
             if log_fn:
-                log_fn(f"🔧 限制使用设备数: {use_device_num} (从 {total_available} 个可用设备中选择)")
+                log_fn(f"🔧 目标使用设备数: {use_device_num} (预热时从 {total_available} 个可用设备中自动切换)")
+            self.devices = available_devices  # 预热阶段先用全部
         else:
             self.devices = available_devices
 
@@ -397,19 +400,27 @@ class Watch:
             return
 
         # 并发预热（preheat）：逐任务签名，失败自动切换设备直至成功
-        preheat_msg = "🧪 开始预热签名（逐任务签名，失败自动切换设备）..."
+        preheat_msg = "🧪 开始预热签名（逐任务签名，失败自动从所有设备中切换）..."
         print(preheat_msg)
         self.log_fun(preheat_msg)
-        total_expected = len(self.users) * len(self.devices) * max(1, self.Multiple_num)
-        expect_msg = f"📊 预计预热任务总数: {total_expected}"
+        
+        # 如果指定了使用设备数，目标任务数就是指定的数量
+        if self.use_device_num > 0:
+            target_device_count = min(self.use_device_num, len(self.all_available_devices))
+        else:
+            target_device_count = len(self.devices)
+        
+        total_expected = len(self.users) * target_device_count * max(1, self.Multiple_num)
+        expect_msg = f"📊 目标预热任务数: {total_expected} (从 {len(self.all_available_devices)} 个可用设备中选择)"
         print(expect_msg)
         self.log_fun(expect_msg)
         ready = []  # (user, device, seconds, sign_data, data_str)
 
         def sign_for_target(u: User, start_idx: int):
-            total_dev = len(self.devices)
+            # 🔥 关键：从所有可用设备中切换，而不是只从限制后的设备中切换
+            total_dev = len(self.all_available_devices)
             for step in range(total_dev):
-                d = self.devices[(start_idx + step) % total_dev]
+                d = self.all_available_devices[(start_idx + step) % total_dev]
                 data_str_local = _build_sign_data(u, d)
                 t_seconds_local = str(int(time.time()))
                 ok, sign_data_local = get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
@@ -417,13 +428,14 @@ class Watch:
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
             return False, None
 
-        # 目标任务（按 user × devices × Multiple_num 构造），并给出设备起点，失败时轮换
+        # 目标任务（按 user × target_device_count × Multiple_num 构造），并给出设备起点，失败时轮换
         targets = []  # (user, start_idx)
         for u in self.users:
-            total_dev = len(self.devices)
+            total_dev = len(self.all_available_devices)
             if total_dev == 0:
                 continue
-            for i in range(total_dev):
+            # 根据目标设备数量生成任务
+            for i in range(target_device_count):
                 for k in range(max(1, self.Multiple_num)):
                     targets.append((u, (i + k) % total_dev))
 
@@ -454,7 +466,13 @@ class Watch:
             _finish_task(0, 0)
             return
 
-        ready_msg = f"✅ 预热完成，可用设备参数: {len(ready)}"
+        # 如果设置了使用设备数限制，确保预热成功的数量满足要求
+        if self.use_device_num > 0 and len(ready) < total_expected:
+            warn_msg = f"⚠️ 预热成功数 {len(ready)} 少于目标 {total_expected}，部分任务无法执行"
+            print(warn_msg)
+            self.log_fun(warn_msg)
+        
+        ready_msg = f"✅ 预热完成，获得 {len(ready)} 个可用设备参数 (目标: {total_expected})"
         print(ready_msg)
         self.log_fun(ready_msg)
 
