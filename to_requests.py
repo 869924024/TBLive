@@ -459,29 +459,72 @@ class Watch:
             completed = 0
             
             # 用于记录发送耗时的变量
-            first_send_time = None
-            last_send_time = None
+            send_start_time = None
+            send_end_time = None
+            send_count = 0
             send_lock = asyncio.Lock()
+            
+            # 🔥 关键优化：创建按代理分组的 client 池，复用连接
+            import httpx
+            from collections import defaultdict
+            
+            # 按代理创建 client 字典
+            client_pool = {}  # {proxy: client}
+            
+            def get_client_for_proxy(proxy):
+                """获取或创建指定代理的 client"""
+                if proxy not in client_pool:
+                    client_kwargs = {
+                        "timeout": httpx.Timeout(15.0, connect=10.0),
+                        "limits": httpx.Limits(
+                            max_connections=50,              # 每个代理最大50个连接
+                            max_keepalive_connections=30,    # 保持30个活动连接
+                            keepalive_expiry=30.0
+                        )
+                    }
+                    # 配置代理
+                    if proxy and proxy != "":
+                        # 解析代理格式
+                        if not (proxy.startswith('socks5://') or proxy.startswith('http://') or proxy.startswith('https://')):
+                            if proxy.count(':') == 3:
+                                # IP:PORT:USERNAME:PASSWORD 格式
+                                parts = proxy.split(':')
+                                ip, port, username, password = parts[0], parts[1], parts[2], parts[3]
+                                proxy_url = f'http://{username}:{password}@{ip}:{port}'
+                            elif proxy.count(':') == 1:
+                                proxy_url = f'http://{proxy}'
+                            else:
+                                proxy_url = f'http://{proxy}'
+                        else:
+                            proxy_url = proxy
+                        client_kwargs["proxies"] = proxy_url
+                    
+                    client_pool[proxy] = httpx.AsyncClient(**client_kwargs)
+                
+                return client_pool[proxy]
 
             async def _shoot(u, d, t_seconds, sign_data, data_str, proxy):
-                nonlocal first_send_time, last_send_time
+                nonlocal send_start_time, send_end_time, send_count
                 
-                # 在真正发送HTTP请求时记录时间
-                # 由于gather会同时启动所有任务，这些时间会非常接近
-                if first_send_time is None:
-                    async with send_lock:
-                        if first_send_time is None:
-                            first_send_time = time.time()
+                # 记录发送时间（发出请求的时刻）
+                async with send_lock:
+                    if send_start_time is None:
+                        send_start_time = time.time()
+                    send_count += 1
                 
                 try:
-                    ok, res = await subscribe_live_msg_prepared_async(d, u, data_str, proxy, t_seconds, sign_data)
-                    # 记录最后一次发送完成的时间
+                    # 根据代理获取对应的 client（相同代理复用同一个 client）
+                    client = get_client_for_proxy(proxy)
+                    ok, res = await subscribe_live_msg_prepared_async_with_client(
+                        client, d, u, data_str, proxy, t_seconds, sign_data
+                    )
+                    # 记录最后一次请求完成的时间
                     async with send_lock:
-                        last_send_time = time.time()
+                        send_end_time = time.time()
                 except Exception as e:
                     ok, res = False, str(e)
                     async with send_lock:
-                        last_send_time = time.time()
+                        send_end_time = time.time()
                 # 若出现非法签名，尝试轮换设备重新签名再发送（最多重试2次）
                 if (not ok) and isinstance(res, str) and ("ILEGEL_SIGN" in res or "非法" in res):
                     try:
@@ -545,7 +588,7 @@ class Watch:
                 tasks.append(_shoot(u, d, t_seconds, sign_data, data_str, proxy))
                 task_index += 1
 
-            send_msg = f"📤 ⚡ 瞬间发送 {len(tasks)} 个任务..."
+            send_msg = f"📤 ⚡ 开始发送 {len(tasks)} 个任务..."
             print(send_msg)
             self.log_fun(send_msg)
             logger.info(f"突发发送: 创建了 {len(tasks)} 个异步任务")
@@ -553,23 +596,22 @@ class Watch:
             # 开始执行任务
             start_ts = time.time()
             
-            # 💥 关键：使用 create_task 立即启动所有任务，HTTP请求会瞬间发出
-            running_tasks = [asyncio.create_task(task) for task in tasks]
+            # 💥 关键：使用 gather 并发执行所有任务
+            try:
+                # 等待所有任务完成
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # 显示连接池统计
+                self.log_fun(f"🔌 使用了 {len(client_pool)} 个HTTP连接池（按代理分组复用）")
+            finally:
+                # 关闭所有 client
+                for client in client_pool.values():
+                    await client.aclose()
             
-            # 稍等片刻，让所有HTTP请求真正发出去
-            await asyncio.sleep(0.1)
-            
-            # 计算发送耗时（第一个到最后一个请求发出的时间）
-            send_duration = (last_send_time - first_send_time) if (first_send_time and last_send_time) else 0
-            
-            # ✅ 所有请求已发出，在UI显示提示
-            send_complete_msg = f"✅ 所有 {len(tasks)} 个请求已发出！发送耗时: {send_duration:.3f}s | 正在等待响应..."
-            print(send_complete_msg)
-            self.log_fun(send_complete_msg)
-            
-            # 现在等待所有任务完成
-            self.log_fun("📊 等待所有响应返回...")
-            results = await asyncio.gather(*running_tasks, return_exceptions=True)
+            # 计算实际发送耗时
+            if send_start_time and send_end_time:
+                send_duration = send_end_time - send_start_time
+                self.log_fun(f"📊 请求发送统计: 共发出 {send_count} 个请求，耗时 {send_duration:.3f}s")
             
             # 统计结果
             self.log_fun("📊 开始统计响应结果...")

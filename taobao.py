@@ -478,6 +478,94 @@ def subscribe_live_msg_prepared(
     )
 
 
+async def call_app_api_prepared_async_with_client(
+        client: httpx.AsyncClient,
+        device: Device,
+        user: User,
+        data_str: str,
+        api: str,
+        v: str,
+        proxy: str,
+        seconds: str,
+        sign_data: dict
+):
+    """异步版本：使用共享的 httpx.AsyncClient（性能优化版本）"""
+    headers = {
+        "Accept-Encoding": "gzip",
+        "user-agent": "MTOPSDK%2F3.1.1.7+%28Android%3B10%3BXiaomi%3BMIX+2S%29+DeviceType%28Phone%29",
+        "x-app-ver": "10.51.0",
+        "x-appkey": "21646297",
+        "x-devid": urllib.parse.quote(device.devid),
+        "x-extdata": "openappkey%3DDEFAULT_AUTH",
+        "x-features": "27",
+        "x-mini-wua": urllib.parse.quote(sign_data["miniwua"]),
+        "x-pv": "6.3",
+        "x-sgext": urllib.parse.quote(sign_data["sgext"]),
+        "x-sid": user.sid,
+        "x-sign": urllib.parse.quote(sign_data["sign"]),
+        "x-t": seconds,
+        "x-ttid": urllib.parse.quote(device.ttid),
+        "x-uid": user.uid,
+        "x-umt": urllib.parse.quote(device.umt),
+        "x-utdid": urllib.parse.quote(device.utdid),
+        "cookie": user.cookies
+    }
+
+    # 如果使用代理，需要配置 client 的代理（注意：client 已经在创建时配置了全局代理）
+    # 这里不需要再创建新的 client
+
+    url = f"https://guide-acs.m.taobao.com/gw/{api}/{v}/"
+
+    try:
+        # 使用共享的 client 发送请求
+        resp = await client.post(url, headers=headers, data={'data': data_str})
+        
+        # 检查HTTP状态码
+        if resp.status_code == 503:
+            return False, f"503 Service Unavailable"
+        elif resp.status_code == 417:
+            return False, f"417 Expectation Failed"
+        elif resp.status_code != 200:
+            return False, f"HTTP {resp.status_code}"
+        
+        response_str = resp.text
+    except httpx.ProxyError as e:
+        return False, f"代理错误: {str(e)[:50]}"
+    except httpx.ConnectTimeout as e:
+        return False, f"连接超时: {str(e)[:50]}"
+    except httpx.ReadTimeout as e:
+        return False, f"读取超时: {str(e)[:50]}"
+    except httpx.TimeoutException as e:
+        return False, f"请求超时: {str(e)[:50]}"
+    except Exception as e:
+        return False, f"网络错误: {str(e)[:50]}"
+
+    if not response_str:
+        return False, "请求失败"
+
+    json_obj = json.loads(response_str)
+    ret = json_obj.get("ret", [])
+    data = json_obj.get("data", {})
+
+    if not ret:
+        return False, "无返回值"
+    ret_msg = ret[0]
+    if "robot::not a normal request" in ret_msg:
+        th = threading.Thread(target=save_timestamp, args=(device.devid,))
+        th.daemon = True
+        th.start()
+        return False, "设备被封禁(robot)"
+    if "FAIL_SYS_ILLEGAL_ACCESS" in ret_msg or "非法" in ret_msg:
+        return False, f"非法访问: {ret_msg}"
+    if not ret_msg.startswith("SUCCESS"):
+        return False, ret_msg
+
+    if "latestSequenceNrs" not in data:
+        return False, "无 latestSequenceNrs"
+    
+    return True, data
+
+
 async def call_app_api_prepared_async(
         device: Device,
         user: User,
@@ -488,7 +576,7 @@ async def call_app_api_prepared_async(
         seconds: str,
         sign_data: dict
 ):
-    """异步版本：已预签名的快速调用。"""
+    """异步版本：已预签名的快速调用（每次创建新 client）。"""
     headers = {
         "Accept-Encoding": "gzip",
         "user-agent": "MTOPSDK%2F3.1.1.7+%28Android%3B10%3BXiaomi%3BMIX+2S%29+DeviceType%28Phone%29",
@@ -600,6 +688,29 @@ async def subscribe_live_msg_prepared_async(
         sign_data: dict
 ):
     return await call_app_api_prepared_async(
+        device,
+        user,
+        data_str,
+        "mtop.taobao.powermsg.msg.subscribe",
+        "1.0",
+        proxy,
+        seconds,
+        sign_data
+    )
+
+
+async def subscribe_live_msg_prepared_async_with_client(
+        client: httpx.AsyncClient,
+        device: Device,
+        user: User,
+        data_str: str,
+        proxy: str,
+        seconds: str,
+        sign_data: dict
+):
+    """使用共享的 httpx.AsyncClient 发送请求（性能优化版本）"""
+    return await call_app_api_prepared_async_with_client(
+        client,
         device,
         user,
         data_str,
