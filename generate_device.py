@@ -7,9 +7,18 @@ import psutil
 import os
 import subprocess
 import socket
-import win32gui
-import win32con
-import win32api
+import sys
+
+# Windows专用模块（Mac/Linux不支持）
+if sys.platform == 'win32':
+    import win32gui
+    import win32con
+    import win32api
+else:
+    # Mac/Linux上的占位符
+    win32gui = None
+    win32con = None
+    win32api = None
 
 
 def kill_process_by_port(port):
