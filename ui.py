@@ -655,7 +655,7 @@ class AccountPage(QWidget):
         )
         if file_path:
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(file_path, 'r', encoding='utf-8-sig') as f:
                     accounts = f.readlines()
                     self.account_list.clear()
                     valid_accounts = []
@@ -834,7 +834,7 @@ class AccountPage(QWidget):
             if not os.path.exists("设备.txt"):
                 return
 
-            with open("设备.txt", 'r', encoding='utf-8') as f:
+            with open("设备.txt", 'r', encoding='utf-8-sig') as f:
                 devices = f.readlines()
 
             # 清空当前列表

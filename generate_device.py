@@ -289,7 +289,7 @@ def manage_file_line(filename, check_string, write_string):
             return 'created'
 
         # 文件存在，读取内容
-        with open(filename, 'r', encoding='utf-8') as f:
+        with open(filename, 'r', encoding='utf-8-sig') as f:
             lines = f.readlines()
 
         # 移除所有空行和每行末尾的空白字符
