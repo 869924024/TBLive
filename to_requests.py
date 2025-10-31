@@ -376,9 +376,10 @@ class Watch:
                 for k in range(max(1, self.Multiple_num)):
                     targets.append((u, (i + k) % total_dev))
 
-        # ⚡ 优化4：提升预热并发数，加快预热速度
-        preheat_workers = max(100, self.thread_nums * 10)  # 提升到至少100并发
-        self.log_fun(f"⚡ 预热并发数: {preheat_workers}")
+        # ⚡ 优化4：预热并发数（根据签名服务性能调整）
+        # 如果签名服务响应慢，降低并发可能反而更快（避免过载）
+        preheat_workers = min(50, max(20, self.thread_nums * 5))  # 20-50之间
+        self.log_fun(f"⚡ 预热并发数: {preheat_workers} (避免签名服务过载)")
         with ThreadPoolExecutor(max_workers=preheat_workers) as pre_executor:
             futs = [pre_executor.submit(sign_for_target, u, start_idx) for (u, start_idx) in targets]
             total_targets = len(futs)

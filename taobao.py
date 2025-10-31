@@ -173,16 +173,10 @@ def subscribe_live_msg(
 
 
 def get_sign(device: Device, user: User, api, v, data, t):
-    """获取签名 - 同步版本，带缓存"""
-    # 生成缓存key
-    cache_key = f"{api}_{data}_{t}_{device.utdid}_{user.uid}"
-
-    # 检查缓存
-    with sign_cache_lock:
-        if cache_key in sign_cache:
-            return True, sign_cache[cache_key]
-
-    start_time = time.time()
+    """获取签名 - 同步版本"""
+    # 注意：预热阶段不使用缓存，因为每次data都不同（包含随机时间戳和随机字符串）
+    # 缓存只在正式发送时有用（但那时也用不上，因为是一次性突发）
+    
     json_data = {
         "utdid": device.utdid,
         "umt": device.umt,
@@ -209,14 +203,6 @@ def get_sign(device: Device, user: User, api, v, data, t):
             return False, f"算法服务错误(HTTP {resp.status_code})"
 
         result = resp.json()
-
-        # 缓存结果
-        with sign_cache_lock:
-            sign_cache[cache_key] = result
-            # 限制缓存大小
-            if len(sign_cache) > 10000:
-                sign_cache.clear()
-
         return True, result
 
     except requests.exceptions.Timeout:
