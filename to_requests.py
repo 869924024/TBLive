@@ -412,6 +412,9 @@ class Watch:
                     else:
                         # 首次处理该索引，选择原始设备
                         d = self.all_available_devices[start_idx % total_dev]
+                        # 🔥 如果设备未被占用，立即占位（防止其他start_idx使用）
+                        if d.devid not in used_devices_in_batch:
+                            used_devices_in_batch.add(d.devid)
             
             # 尝试签名
             if d.devid not in failed_devices_in_batch:
@@ -428,14 +431,12 @@ class Watch:
                                 backup_device_cache[cache_key] = d
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
                 else:
-                    # 签名失败：处理
-                    if self.Multiple_num == 1:
-                        with devices_lock:
-                            used_devices_in_batch.discard(d.devid)
-                    elif self.Multiple_num > 1:
+                    # 签名失败：移除占位标记，清除缓存（如有），记录失败
+                    with devices_lock:
+                        used_devices_in_batch.discard(d.devid)
                         # 倍数>1时，如果缓存的设备失败，清除缓存
-                        cache_key = (u.uid, start_idx)
-                        with devices_lock:
+                        if self.Multiple_num > 1:
+                            cache_key = (u.uid, start_idx)
                             if cache_key in backup_device_cache and backup_device_cache[cache_key].devid == d.devid:
                                 del backup_device_cache[cache_key]
                     failed_devices_in_batch.add(d.devid)
@@ -449,30 +450,35 @@ class Watch:
                 
                 # 倍数=1时，加锁选择和标记设备
                 if self.Multiple_num == 1:
+                    should_skip = False
                     with devices_lock:
                         # 跳过已失败或已使用的设备
                         if candidate.devid in failed_devices_in_batch or candidate.devid in used_devices_in_batch:
-                            continue
-                        
-                        # 占位
-                        d = candidate
-                        used_devices_in_batch.add(d.devid)
+                            should_skip = True
+                        else:
+                            # 占位
+                            d = candidate
+                            used_devices_in_batch.add(d.devid)
+                    
+                    if should_skip:
+                        continue
                 else:
                     # 倍数>1时，需要检查设备是否可用
+                    should_skip = False
                     with devices_lock:
                         # 跳过已失败的设备
                         if candidate.devid in failed_devices_in_batch:
-                            continue
-                        
-                        # 🔥 跳过已被其他 start_idx 缓存的设备（确保不同索引用不同设备）
-                        already_cached = any(
-                            cached_dev.devid == candidate.devid 
-                            for cached_dev in backup_device_cache.values()
-                        )
-                        if already_cached:
-                            continue
-                        
-                        d = candidate
+                            should_skip = True
+                        # 🔥 跳过已被占用的设备（通过 used_devices_in_batch 判断，防止并发竞态）
+                        elif candidate.devid in used_devices_in_batch:
+                            should_skip = True
+                        else:
+                            d = candidate
+                            # 🔥 立即占位，防止其他并发任务使用相同设备
+                            used_devices_in_batch.add(d.devid)
+                    
+                    if should_skip:
+                        continue
                 
                 # 在锁外执行签名（避免阻塞其他线程太久）
                 data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
@@ -489,10 +495,9 @@ class Watch:
                     logger.info(f"✅ 切换到设备 {d.devid[:20]}... 签名成功")
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
                 else:
-                    # 失败：移除占位标记，记录失败列表
-                    if self.Multiple_num == 1:
-                        with devices_lock:
-                            used_devices_in_batch.discard(d.devid)
+                    # 失败：移除占位标记（所有情况都需要），记录失败列表
+                    with devices_lock:
+                        used_devices_in_batch.discard(d.devid)
                     failed_devices_in_batch.add(d.devid)
             
             # 所有设备都失败了
