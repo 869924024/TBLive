@@ -19,6 +19,8 @@ from qfluentwidgets import (
 
 from to_requests import Watch
 from generate_device import Gen, kill_processes_by_keyword
+from database import filter_available, filter_unused_devices
+from model.device import Device
 
 
 class AccountPage(QWidget):
@@ -630,9 +632,19 @@ class AccountPage(QWidget):
 
         card_layout.addLayout(button_h_layout)
 
-        # 设备数量标签
+        # 设备数量标签（水平布局）
+        device_status_layout = QHBoxLayout()
+        device_status_layout.setSpacing(20)
+        
         self.device_count_label = CaptionLabel("当前设备数: 0")
-        card_layout.addWidget(self.device_count_label)
+        device_status_layout.addWidget(self.device_count_label)
+        
+        self.available_device_label = CaptionLabel("可用设备数: 0")
+        self.available_device_label.setStyleSheet("color: #28a745;")  # 绿色
+        device_status_layout.addWidget(self.available_device_label)
+        
+        device_status_layout.addStretch()
+        card_layout.addLayout(device_status_layout)
         
         # 进度显示标签
         self.device_progress_label = CaptionLabel("生成进度: --/--")
@@ -816,6 +828,9 @@ class AccountPage(QWidget):
             self.device_list.addItem(str(data))
             self.device_list.scrollToBottom()
             self.device_count_label.setText(f"当前设备数: {device_count}")
+            
+            # 更新可用设备数
+            self.update_available_device_count()
 
             if self.parent_window:
                 self.parent_window.add_log(f"✅ 成功生成设备: {str(data)[:50]}...")
@@ -827,6 +842,46 @@ class AccountPage(QWidget):
         """生成状态消息回调"""
         if self.parent_window:
             self.parent_window.add_log(f"📡 {message}")
+
+    def update_available_device_count(self):
+        """更新可用设备数（总数 - 封禁 - 已使用）"""
+        try:
+            # 获取所有设备
+            devices = []
+            for i in range(self.device_list.count()):
+                device_str = self.device_list.item(i).text()
+                items = [item.strip() for item in device_str.split("\t") if item.strip()]
+                if len(items) >= 5:
+                    devices.append(Device(items[0], items[1], items[2], items[3], items[4]))
+            
+            if not devices:
+                self.available_device_label.setText("可用设备数: 0")
+                return
+            
+            # 第1步：过滤10小时内被封禁的设备
+            available_devices = filter_available(devices=devices, isaccount=False, interval_hours=10)
+            
+            # 第2步：过滤10分钟内已使用的设备
+            available_devices = filter_unused_devices(available_devices, interval_minutes=10)
+            
+            available_count = len(available_devices)
+            total_count = len(devices)
+            
+            # 更新UI显示
+            self.available_device_label.setText(f"可用设备数: {available_count}/{total_count}")
+            
+            # 根据可用率设置颜色
+            if available_count == 0:
+                self.available_device_label.setStyleSheet("color: #dc3545;")  # 红色
+            elif available_count < total_count * 0.3:
+                self.available_device_label.setStyleSheet("color: #ffc107;")  # 黄色
+            else:
+                self.available_device_label.setStyleSheet("color: #28a745;")  # 绿色
+                
+        except Exception as e:
+            self.available_device_label.setText(f"可用设备数: 计算失败")
+            if self.parent_window:
+                self.parent_window.add_log(f"⚠️ 计算可用设备数失败: {str(e)}")
 
     def load_existing_devices(self):
         """加载现有设备数据并刷新列表"""
@@ -851,6 +906,9 @@ class AccountPage(QWidget):
             # 更新设备数量
             count = len(valid_devices)
             self.device_count_label.setText(f"当前设备数: {count}")
+            
+            # 更新可用设备数
+            self.update_available_device_count()
 
         except Exception as e:
             if self.parent_window:
@@ -877,6 +935,11 @@ class TaskPage(QWidget):
         super().__init__(parent)
         self.setObjectName("taskPage")  # 设置对象名称
         self.parent_window = parent
+        
+        # 创建定时器用于实时更新可用设备数
+        self.device_update_timer = QTimer()
+        self.device_update_timer.timeout.connect(self.update_available_devices_display)
+        
         self.setup_ui()
 
     def setup_ui(self):
@@ -1085,6 +1148,12 @@ class TaskPage(QWidget):
 
         # 连接停止按钮
         self.stop_btn.clicked.connect(self.stop_task)
+        
+        # 启动定时器，每2秒更新一次可用设备数
+        if hasattr(self, 'device_update_timer'):
+            self.device_update_timer.start(2000)  # 2秒更新一次
+            # 立即更新一次
+            self.update_available_devices_display()
 
     def stop_task(self):
         """停止任务"""
@@ -1092,6 +1161,20 @@ class TaskPage(QWidget):
             self.watch.stop_task()
             self.start_btn.setEnabled(True)
             self.stop_btn.setEnabled(False)
+        
+        # 停止定时器
+        if hasattr(self, 'device_update_timer'):
+            self.device_update_timer.stop()
+            # 最后更新一次
+            self.update_available_devices_display()
+
+    def update_available_devices_display(self):
+        """更新可用设备数显示（调用AccountPage的更新方法）"""
+        try:
+            if self.parent_window and hasattr(self.parent_window, 'account_page'):
+                self.parent_window.account_page.update_available_device_count()
+        except Exception as e:
+            pass  # 静默失败，不影响主流程
 
     def clear_log(self):
         """清空日志"""

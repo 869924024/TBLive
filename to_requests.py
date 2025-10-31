@@ -368,19 +368,44 @@ class Watch:
                 data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
                 ok, sign_data_local = get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
                 if ok and isinstance(sign_data_local, dict):
+                    # 🔥 签名成功后立即记录设备使用（10分钟内不可重复使用）
+                    mark_device_used(d.devid)
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
             return False, None
 
         # 目标任务（按 user × target_device_count × Multiple_num 构造），并给出设备起点，失败时轮换
+        # 🔥 关键修改：每个用户使用不同的设备范围，而不是共享相同的设备
         targets = []  # (user, start_idx)
-        for u in self.users:
-            total_dev = len(self.all_available_devices)
-            if total_dev == 0:
-                continue
-            # 根据目标设备数量生成任务
+        total_dev = len(self.all_available_devices)
+        if total_dev == 0:
+            fail_msg = "❌ 没有可用设备"
+            print(fail_msg)
+            self.log_fun(fail_msg)
+            _finish_task(0, 0)
+            return
+        
+        user_device_offset = 0  # 每个用户的设备起始偏移
+        for user_idx, u in enumerate(self.users):
+            # 为每个用户分配独立的设备范围
+            # user1: 设备0-199, user2: 设备200-399, ...
             for i in range(target_device_count):
+                device_idx = (user_device_offset + i) % total_dev
                 for k in range(max(1, self.Multiple_num)):
-                    targets.append((u, (i + k) % total_dev))
+                    # 同一个设备重复Multiple_num次（倍数）
+                    targets.append((u, device_idx))
+            # 下一个用户的设备起始位置
+            user_device_offset += target_device_count
+        
+        # 日志显示任务规划
+        plan_msg = f"📊 任务规划:\n"
+        plan_msg += f"   - {len(self.users)} 个账号 × {target_device_count} 个设备 × {max(1, self.Multiple_num)} 倍 = {len(targets)} 个任务\n"
+        plan_msg += f"   - 实际签名次数: {len(targets)} 次\n"
+        if len(self.users) > 1:
+            plan_msg += f"   - 每个账号独立使用 {target_device_count} 个不同设备\n"
+        else:
+            plan_msg += f"   - 每个账号签名: {len(targets)} 次（循环使用 {target_device_count} 个设备）"
+        print(plan_msg)
+        self.log_fun(plan_msg)
 
         # ⚡ 优化4：预热并发数（根据签名服务性能调整）
         # 如果签名服务响应慢，降低并发可能反而更快（避免过载）
@@ -420,9 +445,32 @@ class Watch:
             print(warn_msg)
             self.log_fun(warn_msg)
         
+        # 统计使用的唯一设备数
+        unique_devices = set()
+        account_stats = {}  # 统计每个账号的签名次数
+        for u, d, _, _, _ in ready:
+            unique_devices.add(d.devid)
+            account_key = u.uid[:10] + "..."
+            account_stats[account_key] = account_stats.get(account_key, 0) + 1
+        
         ready_msg = f"✅ 预热完成，获得 {len(ready)} 个可用设备参数 (目标: {total_expected})"
         print(ready_msg)
         self.log_fun(ready_msg)
+        
+        # 显示详细统计
+        stats_msg = f"\n✅ 预热完成汇总:"
+        stats_msg += f"\n   - 总签名次数: {len(ready)} 次（目标: {total_expected}）"
+        stats_msg += f"\n   - 使用设备数: {len(unique_devices)} 个不同设备（已标记10分钟内不可用）"
+        for acc, count in account_stats.items():
+            stats_msg += f"\n   - 账号 {acc}: {count} 次"
+        if len(ready) >= total_expected:
+            stats_msg += f"\n   - 状态: 🎉 完美达标！"
+        elif len(ready) >= total_expected * 0.9:
+            stats_msg += f"\n   - 状态: ✅ 基本达标"
+        else:
+            stats_msg += f"\n   - 状态: ⚠️ 未达标，可能影响效果"
+        print(stats_msg)
+        self.log_fun(stats_msg)
 
         # 突发异步：使用 asyncio + httpx.AsyncClient 瞬发
         burst_start = "🚀 突发发送开始（asyncio，不等待前序返回）..."
@@ -532,7 +580,6 @@ class Watch:
                 return ok, res
 
             tasks = []
-            task_devices = []  # 保存每个任务对应的设备（用于成功后标记）
             task_index = 0
             for u, d, t_seconds, sign_data, data_str in ready:
                 # 获取代理（使用代理池或原始代理）
@@ -541,7 +588,6 @@ class Watch:
                 else:
                     proxy = self.proxy_value
                 tasks.append(_shoot(u, d, t_seconds, sign_data, data_str, proxy))
-                task_devices.append(d)  # 保存设备引用
                 task_index += 1
 
             send_msg = f"📤 ⚡ 开始发送 {len(tasks)} 个任务..."
@@ -572,10 +618,7 @@ class Watch:
             # 统计结果
             self.log_fun("📊 开始统计响应结果...")
             fail_reasons = {}  # 统计失败原因
-            marked_devices = []  # 已标记的设备（用于日志）
             for i, result in enumerate(results):
-                device = task_devices[i]  # 获取对应的设备
-                
                 if isinstance(result, Exception):
                     failed += 1
                     error_msg = str(result)[:50]
@@ -584,9 +627,6 @@ class Watch:
                     ok, res = result
                     if ok:
                         success += 1
-                        # 🔥 成功后标记设备已使用（10分钟内不再使用）
-                        mark_device_used(device.devid)
-                        marked_devices.append(device.devid)
                     else:
                         failed += 1
                         # 记录失败原因
@@ -611,11 +651,6 @@ class Watch:
 
             total_time = time.time() - start_ts
             self.log_fun(f"🏁 全部完成 | 总耗时: {total_time:.2f}s | 成功={success}, 失败={failed}")
-            
-            # 显示设备使用统计
-            if marked_devices:
-                unique_marked = len(set(marked_devices))
-                self.log_fun(f"📝 设备使用记录: 已标记 {unique_marked} 个设备（10分钟内不可重复使用）")
             
             # 返回结果用于更新UI
             return success, failed
