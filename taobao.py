@@ -97,8 +97,8 @@ def build_subscribe_data(user: User, device: Device, account_id: str, live_id: s
     ext = {
         "ignorePv": "0",
         "liveClientParams": {
-            "livesource": "PlayBackToLive",
-            "entryLiveSource": "PlayBackToLive",
+            "livesource": "homepage.changjinglu.zhusou",
+            "entryLiveSource": "homepage.changjinglu.zhusou",
             "liveToken": live_token,
             "spm-cnt": "a2141.8001249",
             "isAD": "0",
@@ -124,10 +124,12 @@ def build_subscribe_data(user: User, device: Device, account_id: str, live_id: s
         "internalExt": "",
         "namespace": 1,
         "role": 3,
-        "sdkVersion": "0.3.0",
+        "sdkVersion": "0.2.4",
         "tag": "",
         "topic": topic,
-        "utdId": device.utdid
+        "utdId": device.utdid,
+        "xxx_api_name": "mtop.taobao.powermsg.msg.subscribe",
+        "xxx_api_version": "1.0",
     }
     
     data_str = json.dumps(json_data, ensure_ascii=False)
@@ -137,7 +139,7 @@ def build_subscribe_data(user: User, device: Device, account_id: str, live_id: s
         print(f"  data_str 长度: {len(data_str)}")
         print(f"  seconds: {str(now_seconds)} (秒级)")
         print(f"  now_ms: {now_ms} (毫秒级)")
-        print(f"  data_str 前200字符: {data_str[:200]}")
+        print(f"  data_str 前200字符: {data_str}")
         build_subscribe_data._debug_printed = True
     return data_str, str(now_seconds)  # 返回秒级时间戳用于签名
 
@@ -194,7 +196,7 @@ def get_sign(device: Device, user: User, api, v, data, t):
         if resp.status_code != 200:
             # 返回简洁的错误消息，不返回完整的JSON
             error_msg = f"算法服务错误(HTTP {resp.status_code})"
-            print(f"❌ 签名请求失败: {error_msg}, 响应内容: {resp.text[:200]}")
+            # print(f"❌ 签名请求失败: {error_msg}, 响应内容: {resp.text[:200]}")
             return False, error_msg
 
         result = resp.json()
