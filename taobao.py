@@ -79,16 +79,18 @@ def build_subscribe_data(user: User, device: Device, account_id: str, live_id: s
         tuple: (data_str, seconds) - JSON字符串和时间戳
     """
     # 统一获取时间戳
-    now = int(time.time() * 1000)  # 毫秒时间
+    now_seconds = int(time.time())  # 秒级时间戳（用于签名）
+    now_ms = now_seconds * 1000  # 毫秒时间戳（用于构造数据）
+    
     # 添加小的随机偏移（-200ms到+200ms），避免批量请求时间戳完全相同
     random_offset = random.randint(-200, 200)
-    now = now + random_offset
+    now_ms = now_ms + random_offset
 
-    pm_session = f"{now}{tools.get_random_string()}"
-    live_token = f"{now}_{live_id}_{tools.get_random_string(4, True)}"
+    pm_session = f"{now_ms}{tools.get_random_string()}"
+    live_token = f"{now_ms}_{live_id}_{tools.get_random_string(4, True)}"
 
     # 计算 watchId
-    watch_id_str = f"{now}{user.uid}{live_id}"
+    watch_id_str = f"{now_ms}{user.uid}{live_id}"
     watch_id = hashlib.md5(watch_id_str.encode("utf-8")).hexdigest().upper()
 
     # 构造 ext 参数
@@ -133,10 +135,11 @@ def build_subscribe_data(user: User, device: Device, account_id: str, live_id: s
     if not hasattr(build_subscribe_data, "_debug_printed"):
         print(f"[DEBUG] build_subscribe_data 输出示例:")
         print(f"  data_str 长度: {len(data_str)}")
-        print(f"  seconds: {str(now_seconds)}")
+        print(f"  seconds: {str(now_seconds)} (秒级)")
+        print(f"  now_ms: {now_ms} (毫秒级)")
         print(f"  data_str 前200字符: {data_str[:200]}")
         build_subscribe_data._debug_printed = True
-    return data_str, str(now)
+    return data_str, str(now_seconds)  # 返回秒级时间戳用于签名
 
 
 def subscribe_live_msg(
@@ -188,7 +191,6 @@ def get_sign(device: Device, user: User, api, v, data, t):
                              headers={"content-type": "application/json"},
                              json=json_data,
                              timeout=3)
-        print(f"签名服务响应状态码: {resp.status_code}, 内容: {resp.text}")
         if resp.status_code != 200:
             # 返回简洁的错误消息，不返回完整的JSON
             error_msg = f"算法服务错误(HTTP {resp.status_code})"
