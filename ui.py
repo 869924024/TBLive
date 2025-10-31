@@ -936,10 +936,6 @@ class TaskPage(QWidget):
         self.setObjectName("taskPage")  # 设置对象名称
         self.parent_window = parent
         
-        # 创建定时器用于实时更新可用设备数
-        self.device_update_timer = QTimer()
-        self.device_update_timer.timeout.connect(self.update_available_devices_display)
-        
         self.setup_ui()
 
     def setup_ui(self):
@@ -1139,6 +1135,9 @@ class TaskPage(QWidget):
             return
 
 
+        # 任务开始前更新一次可用设备数
+        self.update_available_devices_display()
+        
         # 启动任务（传入self以便更新UI）
         self.watch.start_task(self)
 
@@ -1148,12 +1147,6 @@ class TaskPage(QWidget):
 
         # 连接停止按钮
         self.stop_btn.clicked.connect(self.stop_task)
-        
-        # 启动定时器，每2秒更新一次可用设备数
-        if hasattr(self, 'device_update_timer'):
-            self.device_update_timer.start(2000)  # 2秒更新一次
-            # 立即更新一次
-            self.update_available_devices_display()
 
     def stop_task(self):
         """停止任务"""
@@ -1162,11 +1155,8 @@ class TaskPage(QWidget):
             self.start_btn.setEnabled(True)
             self.stop_btn.setEnabled(False)
         
-        # 停止定时器
-        if hasattr(self, 'device_update_timer'):
-            self.device_update_timer.stop()
-            # 最后更新一次
-            self.update_available_devices_display()
+        # 任务结束后更新一次可用设备数
+        self.update_available_devices_display()
 
     def update_available_devices_display(self):
         """更新可用设备数显示（调用AccountPage的更新方法）"""

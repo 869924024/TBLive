@@ -133,6 +133,10 @@ class Watch:
                 ui_widget.success_count.setText(str(success))
                 ui_widget.fail_count.setText(str(failed))
                 print(f"[DEBUG] UI状态已恢复: 成功={success}, 失败={failed}")
+                
+                # 任务完成后更新可用设备数
+                if hasattr(ui_widget, 'update_available_devices_display'):
+                    ui_widget.update_available_devices_display()
             except Exception as e:
                 print(f"[DEBUG] 恢复UI状态失败: {e}")
         
