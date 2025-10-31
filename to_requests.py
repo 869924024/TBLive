@@ -363,149 +363,65 @@ class Watch:
         self.log_fun(expect_msg)
         ready = []  # (user, device, seconds, sign_data, data_str)
 
-        # 记录本批次中签名失败的设备（避免重复尝试，但不永久标记）
-        failed_devices_in_batch = set()
-        # 记录本批次中已使用的设备（当倍数=1时，确保不重复使用）
-        used_devices_in_batch = set()
-        # 倍数>1时，为每个用户的每个设备索引缓存成功的备用设备
-        # key: (user_id, start_idx), value: device
-        backup_device_cache = {}  # {(uid, start_idx): device}
-        # 线程锁：保护并发访问
+        # 🔥 新的简化逻辑：
+        # 第一阶段：找到 target_device_count 个不同的设备
+        # 第二阶段：每个设备签名 Multiple_num 次
+        
+        # 第一阶段：找到不同的设备
+        selected_devices = []  # [(user, device)]
+        failed_devices = set()
         devices_lock = threading.Lock()
         
-        def sign_for_target(u: User, start_idx: int):
-            # 🔥 根据倍数决定策略：
-            # - 倍数 > 1：允许同一设备多次签名（设备0签名12次，设备1签名12次）
-            # - 倍数 = 1：强制使用不同设备（5个任务用5个不同设备）
+        def find_unique_device(u: User, start_idx: int):
+            """第一阶段：为每个 start_idx 找到一个不同的设备"""
             total_dev = len(self.all_available_devices)
             
-            # 🔒 选择设备（根据倍数策略不同）
-            if self.Multiple_num == 1:
-                # 倍数=1：使用锁保护，确保每个任务用不同设备
-                with devices_lock:
-                    d = self.all_available_devices[start_idx % total_dev]
-                    
-                    # 如果该设备已被本批次使用，则必须切换到其他设备
-                    if d.devid in used_devices_in_batch:
-                        found = False
-                        for step in range(1, total_dev):
-                            candidate = self.all_available_devices[(start_idx + step) % total_dev]
-                            if candidate.devid not in used_devices_in_batch and candidate.devid not in failed_devices_in_batch:
-                                d = candidate
-                                found = True
-                                break
-                        if not found:
-                            return False, None
-                    
-                    # 提前标记该设备
-                    if d.devid not in failed_devices_in_batch:
-                        used_devices_in_batch.add(d.devid)
-                    else:
-                        return False, None
-            else:
-                # 倍数>1：检查是否有缓存的备用设备
-                cache_key = (u.uid, start_idx)
-                with devices_lock:
-                    if cache_key in backup_device_cache:
-                        # 使用缓存的设备（该索引的其他倍数任务已找到备用设备）
-                        d = backup_device_cache[cache_key]
-                    else:
-                        # 首次处理该索引，选择原始设备
-                        d = self.all_available_devices[start_idx % total_dev]
-                        # 🔥 如果设备未被占用，立即占位（防止其他start_idx使用）
-                        if d.devid not in used_devices_in_batch:
-                            used_devices_in_batch.add(d.devid)
-            
-            # 尝试签名
-            if d.devid not in failed_devices_in_batch:
-                data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
-                ok, sign_data_local = get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
-                if ok and isinstance(sign_data_local, dict):
-                    # 签名成功：记录设备使用
-                    mark_device_used(d.devid)
-                    # 倍数>1时，缓存该索引的成功设备
-                    if self.Multiple_num > 1:
-                        cache_key = (u.uid, start_idx)
-                        with devices_lock:
-                            if cache_key not in backup_device_cache:
-                                backup_device_cache[cache_key] = d
-                    return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
-                else:
-                    # 签名失败：移除占位标记，清除缓存（如有），记录失败
-                    with devices_lock:
-                        used_devices_in_batch.discard(d.devid)
-                        # 倍数>1时，如果缓存的设备失败，清除缓存
-                        if self.Multiple_num > 1:
-                            cache_key = (u.uid, start_idx)
-                            if cache_key in backup_device_cache and backup_device_cache[cache_key].devid == d.devid:
-                                del backup_device_cache[cache_key]
-                    failed_devices_in_batch.add(d.devid)
-                    logger.warning(f"⚠️ 设备 {d.devid[:20]}... 签名失败，本批次跳过")
-            
-            # 如果指定设备失败，尝试其他可用设备（故障转移）
-            # 🔥 关键：从 start_idx 开始找，确保不同索引的任务找到不同的备用设备
-            for step in range(1, total_dev):
+            # 尝试从 start_idx 开始的设备
+            for step in range(total_dev):
                 candidate_idx = (start_idx + step) % total_dev
                 candidate = self.all_available_devices[candidate_idx]
                 
-                # 倍数=1时，加锁选择和标记设备
-                if self.Multiple_num == 1:
-                    should_skip = False
-                    with devices_lock:
-                        # 跳过已失败或已使用的设备
-                        if candidate.devid in failed_devices_in_batch or candidate.devid in used_devices_in_batch:
-                            should_skip = True
-                        else:
-                            # 占位
-                            d = candidate
-                            used_devices_in_batch.add(d.devid)
-                    
-                    if should_skip:
+                # 加锁检查并占位
+                with devices_lock:
+                    # 检查设备是否已被选中或失败
+                    already_used = any(d.devid == candidate.devid for _, d in selected_devices)
+                    if already_used or candidate.devid in failed_devices:
                         continue
-                else:
-                    # 倍数>1时，需要检查设备是否可用
-                    should_skip = False
-                    with devices_lock:
-                        # 跳过已失败的设备
-                        if candidate.devid in failed_devices_in_batch:
-                            should_skip = True
-                        # 🔥 跳过已被占用的设备（通过 used_devices_in_batch 判断，防止并发竞态）
-                        elif candidate.devid in used_devices_in_batch:
-                            should_skip = True
-                        else:
-                            d = candidate
-                            # 🔥 立即占位，防止其他并发任务使用相同设备
-                            used_devices_in_batch.add(d.devid)
                     
-                    if should_skip:
-                        continue
+                    # 占位：先添加到列表（其他线程会看到）
+                    selected_devices.append((u, candidate))
                 
-                # 在锁外执行签名（避免阻塞其他线程太久）
-                data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
-                ok, sign_data_local = get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
+                # 在锁外测试签名（验证设备可用性）
+                data_str_local, t_seconds_local = build_subscribe_data(u, candidate, account_id, live_id, topic)
+                ok, sign_data_local = get_sign(candidate, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
+                
                 if ok and isinstance(sign_data_local, dict):
-                    # 成功：记录设备使用
-                    mark_device_used(d.devid)
-                    # 倍数>1时，缓存该索引的备用设备
-                    if self.Multiple_num > 1:
-                        cache_key = (u.uid, start_idx)
-                        with devices_lock:
-                            if cache_key not in backup_device_cache:
-                                backup_device_cache[cache_key] = d
-                    logger.info(f"✅ 切换到设备 {d.devid[:20]}... 签名成功")
-                    return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
+                    # 设备可用，签名成功
+                    mark_device_used(candidate.devid)
+                    return True, (u, candidate, t_seconds_local, sign_data_local, data_str_local)
                 else:
-                    # 失败：移除占位标记（所有情况都需要），记录失败列表
+                    # 设备不可用，移除占位，标记失败，继续尝试下一个
                     with devices_lock:
-                        used_devices_in_batch.discard(d.devid)
-                    failed_devices_in_batch.add(d.devid)
+                        selected_devices.remove((u, candidate))
+                        failed_devices.add(candidate.devid)
+                    logger.warning(f"⚠️ 设备 {candidate.devid[:20]}... 签名失败，尝试下一个")
             
             # 所有设备都失败了
             return False, None
+        
+        def sign_with_device(u: User, device: Device):
+            """第二阶段：使用已选定的设备进行签名"""
+            data_str_local, t_seconds_local = build_subscribe_data(u, device, account_id, live_id, topic)
+            ok, sign_data_local = get_sign(device, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
+            
+            if ok and isinstance(sign_data_local, dict):
+                mark_device_used(device.devid)
+                return True, (u, device, t_seconds_local, sign_data_local, data_str_local)
+            else:
+                logger.warning(f"⚠️ 设备 {device.devid[:20]}... 重复签名失败")
+                return False, None
 
-        # 目标任务（按 user × target_device_count × Multiple_num 构造），并给出设备起点，失败时轮换
-        # 🔥 关键修改：每个用户使用不同的设备范围，而不是共享相同的设备
-        targets = []  # (user, start_idx)
+        # 🔥 两阶段执行逻辑
         total_dev = len(self.all_available_devices)
         if total_dev == 0:
             fail_msg = "❌ 没有可用设备"
@@ -514,53 +430,87 @@ class Watch:
             _finish_task(0, 0)
             return
         
-        user_device_offset = 0  # 每个用户的设备起始偏移
+        # 第一阶段：并发找到不同的设备
+        phase1_tasks = []  # [(user, start_idx)]
+        user_device_offset = 0
         for user_idx, u in enumerate(self.users):
-            # 为每个用户分配独立的设备范围
-            # user1: 设备0-199, user2: 设备200-399, ...
             for i in range(target_device_count):
                 device_idx = (user_device_offset + i) % total_dev
-                for k in range(max(1, self.Multiple_num)):
-                    # 同一个设备重复Multiple_num次（倍数）
-                    targets.append((u, device_idx))
-            # 下一个用户的设备起始位置
+                phase1_tasks.append((u, device_idx))
             user_device_offset += target_device_count
         
         # 日志显示任务规划
+        total_tasks = len(phase1_tasks) * max(1, self.Multiple_num)
         plan_msg = f"📊 任务规划:\n"
-        plan_msg += f"   - {len(self.users)} 个账号 × {target_device_count} 个设备 × {max(1, self.Multiple_num)} 倍 = {len(targets)} 个任务\n"
-        plan_msg += f"   - 实际签名次数: {len(targets)} 次\n"
-        if len(self.users) > 1:
-            plan_msg += f"   - 每个账号独立使用 {target_device_count} 个不同设备\n"
-        else:
-            plan_msg += f"   - 每个账号签名: {len(targets)} 次（循环使用 {target_device_count} 个设备）"
+        plan_msg += f"   - {len(self.users)} 个账号 × {target_device_count} 个设备 × {max(1, self.Multiple_num)} 倍 = {total_tasks} 个任务\n"
+        plan_msg += f"   - 第一阶段: 找到 {len(phase1_tasks)} 个不同设备\n"
+        plan_msg += f"   - 第二阶段: 每个设备签名 {max(1, self.Multiple_num)} 次"
         print(plan_msg)
         self.log_fun(plan_msg)
 
-        # ⚡ 优化4：预热并发数（根据签名服务性能调整）
-        # 如果签名服务响应慢，降低并发可能反而更快（避免过载）
-        preheat_workers = min(50, max(20, self.thread_nums * 5))  # 20-50之间
-        self.log_fun(f"⚡ 预热并发数: {preheat_workers} (避免签名服务过载)")
-        with ThreadPoolExecutor(max_workers=preheat_workers) as pre_executor:
-            futs = [pre_executor.submit(sign_for_target, u, start_idx) for (u, start_idx) in targets]
-            total_targets = len(futs)
-            done_cnt = 0
-            succ_cnt = 0
-            for fut in as_completed(futs):
+        # 第一阶段：并发查找不同设备
+        preheat_workers = min(50, max(20, self.thread_nums * 5))
+        self.log_fun(f"⚡ 第一阶段并发数: {preheat_workers}")
+        
+        phase1_results = []  # 第一阶段成功找到的设备
+        with ThreadPoolExecutor(max_workers=preheat_workers) as executor:
+            futs = [executor.submit(find_unique_device, u, start_idx) for (u, start_idx) in phase1_tasks]
+            for idx, fut in enumerate(as_completed(futs), 1):
                 try:
-                    ok, packed = fut.result(timeout=30)  # 缩短超时到10秒
+                    ok, packed = fut.result(timeout=30)
                     if ok and packed:
-                        ready.append(packed)
-                        succ_cnt += 1
-                    # 全失败则跳过
-                except Exception:
-                    pass
-                done_cnt += 1
-                # ⚡ 优化5：减少日志输出频率（每100个或完成时）
-                if done_cnt % 100 == 0 or done_cnt == total_targets:
-                    prog = f"预热进度: {done_cnt}/{total_targets}, 成功={succ_cnt}, 失败={done_cnt - succ_cnt}"
+                        phase1_results.append(packed)
+                        ready.append(packed)  # 第一阶段的签名也加入ready
+                except Exception as e:
+                    logger.error(f"第一阶段任务失败: {e}")
+                
+                # 进度显示
+                if idx % 10 == 0 or idx == len(futs):
+                    prog = f"第一阶段进度: {idx}/{len(futs)}, 成功找到={len(phase1_results)}个设备"
                     print(prog)
                     self.log_fun(prog)
+        
+        if not phase1_results:
+            fail_msg = "❌ 第一阶段失败：未找到任何可用设备"
+            print(fail_msg)
+            self.log_fun(fail_msg)
+            _finish_task(0, 0)
+            return
+        
+        phase1_msg = f"✅ 第一阶段完成：找到 {len(phase1_results)} 个不同设备"
+        print(phase1_msg)
+        self.log_fun(phase1_msg)
+        
+        # 第二阶段：每个设备签名 (Multiple_num - 1) 次（因为第一阶段已经签名1次）
+        if self.Multiple_num > 1:
+            phase2_tasks = []  # [(user, device)]
+            for u, device, _, _, _ in phase1_results:
+                for _ in range(self.Multiple_num - 1):
+                    phase2_tasks.append((u, device))
+            
+            self.log_fun(f"⚡ 第二阶段: {len(phase2_tasks)} 次签名任务")
+            
+            with ThreadPoolExecutor(max_workers=preheat_workers) as executor:
+                futs = [executor.submit(sign_with_device, u, device) for (u, device) in phase2_tasks]
+                phase2_succ = 0
+                for idx, fut in enumerate(as_completed(futs), 1):
+                    try:
+                        ok, packed = fut.result(timeout=30)
+                        if ok and packed:
+                            ready.append(packed)
+                            phase2_succ += 1
+                    except Exception as e:
+                        logger.error(f"第二阶段任务失败: {e}")
+                    
+                    # 进度显示
+                    if idx % 50 == 0 or idx == len(futs):
+                        prog = f"第二阶段进度: {idx}/{len(futs)}, 成功={phase2_succ}"
+                        print(prog)
+                        self.log_fun(prog)
+            
+            phase2_msg = f"✅ 第二阶段完成：{phase2_succ}/{len(phase2_tasks)} 次签名成功"
+            print(phase2_msg)
+            self.log_fun(phase2_msg)
 
         if not ready:
             fail_preheat = "❌ 预热失败：没有可用的设备参数"
