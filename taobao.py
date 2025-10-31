@@ -22,6 +22,9 @@ import queue
 # _session.mount('http://', requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=500, max_retries=1))
 # _session.mount('https://', requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=500, max_retries=1))
 
+# 全局签名缓存池
+sign_cache = {}
+sign_cache_lock = threading.Lock()
 
 def test_proxy(proxy_str):
     """测试代理是否可用，返回出口IP"""
@@ -29,8 +32,7 @@ def test_proxy(proxy_str):
         # 解析代理
         if not proxy_str or proxy_str == "":
             return False, "未配置代理"
-        
-        proxy_url = proxy_str
+
         if proxy_str.startswith('http://') or proxy_str.startswith('socks5://'):
             proxy_url = proxy_str
         elif proxy_str.count(':') == 3:
@@ -171,7 +173,16 @@ def subscribe_live_msg(
 
 
 def get_sign(device: Device, user: User, api, v, data, t):
-    """获取签名 - 同步版本"""
+    """获取签名 - 同步版本，带缓存"""
+    # 生成缓存key
+    cache_key = f"{api}_{data}_{t}_{device.utdid}_{user.uid}"
+
+    # 检查缓存
+    with sign_cache_lock:
+        if cache_key in sign_cache:
+            return True, sign_cache[cache_key]
+
+    start_time = time.time()
     json_data = {
         "utdid": device.utdid,
         "umt": device.umt,
@@ -195,20 +206,23 @@ def get_sign(device: Device, user: User, api, v, data, t):
                              timeout=3)
         if resp.status_code != 200:
             # 返回简洁的错误消息，不返回完整的JSON
-            error_msg = f"算法服务错误(HTTP {resp.status_code})"
-            # print(f"❌ 签名请求失败: {error_msg}, 响应内容: {resp.text[:200]}")
-            return False, error_msg
+            return False, f"算法服务错误(HTTP {resp.status_code})"
 
         result = resp.json()
+
+        # 缓存结果
+        with sign_cache_lock:
+            sign_cache[cache_key] = result
+            # 限制缓存大小
+            if len(sign_cache) > 10000:
+                sign_cache.clear()
+
         return True, result
-        
+
     except requests.exceptions.Timeout:
-        print(f"❌ 签名请求超时: 算法服务无响应")
         return False, "算法服务超时"
     except Exception as e:
-        print(f"❌ 签名请求异常: {str(e)[:100]}")
         return False, f"算法服务异常: {str(e)[:30]}"
-
 
 def call_app_api(
         device: Device,
