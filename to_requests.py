@@ -6,7 +6,7 @@ from database import filter_available
 from model.user import User
 from model.device import Device
 from task_batch import AsyncTaskThread
-from taobao import get_sign, subscribe_live_msg_prepared, subscribe_live_msg_prepared_async, subscribe_live_msg_prepared_async_with_client
+from taobao import get_sign, subscribe_live_msg_prepared, subscribe_live_msg_prepared_async, subscribe_live_msg_prepared_async_with_client, build_subscribe_data
 from proxy_manager import ProxyManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -198,43 +198,7 @@ class Watch:
         
         # 预热签名：为每个设备参数尝试一次签名，失败则丢弃
         # 目的：确保算法签名服务与设备参数可用，避免突发时失败率过高
-        def _build_sign_data(u: User, d: Device):
-            # 与订阅接口一致的 data 结构（最小必要字段）
-            import hashlib, json as _json, time as _time
-            now_ms = int(_time.time() * 1000)
-            # 构造 ext
-            ext = {
-                "ignorePv": "0",
-                "liveClientParams": {
-                    "pmClientType": "kmpLiveRoom",
-                    "pmSession": f"{now_ms}PREHEAT",
-                    "liveToken": f"{now_ms}_{live_id}_PH",
-                    "livesource": "PlayBackToLive",
-                    "entryLiveSource": "PlayBackToLive",
-                    "isAD": "0",
-                    "pvid": hashlib.md5(f"{now_ms}{u.uid}{live_id}".encode("utf-8")).hexdigest()
-                },
-                "liveServerParams": {
-                    "accountId": account_id,
-                    "liveId": live_id,
-                    "status": "1"
-                },
-                "needEventWhenIgnorePv": "true"
-            }
-            json_data = {
-                "appKey": "21646297",
-                "ext": _json.dumps(ext, ensure_ascii=False),
-                "from": u.nickname,
-                "id": u.uid,
-                "internalExt": "",
-                "namespace": 1,
-                "role": 3,
-                "sdkVersion": "0.3.0",
-                "tag": "",
-                "topic": topic,
-                "utdId": d.utdid
-            }
-            return _json.dumps(json_data, ensure_ascii=False)
+        # 使用 taobao.py 中统一的构造函数
 
         # 选择模式
         mode_msg = f"🧭 突发模式: {self.burst_mode}"
@@ -295,41 +259,8 @@ class Watch:
 
                 async def _sign_then_shoot(u, d, task_index):
                     nonlocal first_send_time, last_send_time
-                    import json as _json, hashlib as _hashlib
-                    now_ms = int(time.time() * 1000)
-                    ext = {
-                        "ignorePv": "0",
-                        "liveClientParams": {
-                            "pmClientType": "kmpLiveRoom",
-                            "pmSession": f"{now_ms}INSTANT",
-                            "liveToken": f"{now_ms}_{live_id}_IN",
-                            "livesource": "PlayBackToLive",
-                            "entryLiveSource": "PlayBackToLive",
-                            "isAD": "0",
-                            "pvid": _hashlib.md5(f"{now_ms}{u.uid}{live_id}".encode("utf-8")).hexdigest()
-                        },
-                        "liveServerParams": {
-                            "accountId": account_id,
-                            "liveId": live_id,
-                            "status": "1"
-                        },
-                        "needEventWhenIgnorePv": "true"
-                    }
-                    json_data = {
-                        "appKey": "21646297",
-                        "ext": _json.dumps(ext, ensure_ascii=False),
-                        "from": u.nickname,
-                        "id": u.uid,
-                        "internalExt": "",
-                        "namespace": 1,
-                        "role": 3,
-                        "sdkVersion": "0.3.0",
-                        "tag": "",
-                        "topic": topic,
-                        "utdId": d.utdid
-                    }
-                    data_str = _json.dumps(json_data, ensure_ascii=False)
-                    t_seconds = str(int(time.time()))
+                    # 使用统一的构造函数
+                    data_str, t_seconds = build_subscribe_data(u, d, account_id, live_id, topic, "INSTANT")
 
                     # 在线程池中执行阻塞式签名
                     loop = asyncio.get_running_loop()
@@ -427,8 +358,8 @@ class Watch:
             total_dev = len(self.all_available_devices)
             for step in range(total_dev):
                 d = self.all_available_devices[(start_idx + step) % total_dev]
-                data_str_local = _build_sign_data(u, d)
-                t_seconds_local = str(int(time.time()))
+                # 使用统一的构造函数
+                data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic, "PREHEAT")
                 ok, sign_data_local = get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
                 if ok and isinstance(sign_data_local, dict):
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
@@ -579,38 +510,8 @@ class Watch:
                     max_retry = min(2, max(0, len(self.devices) - 1))
                     for step in range(1, max_retry + 1):
                         nd = self.devices[(base_idx + step) % len(self.devices)]
-                        # 重新构造数据并签名
-                        import json as _json, hashlib as _hashlib
-                        now_ms2 = int(time.time() * 1000)
-                        ext2 = {
-                            "ignorePv": "0",
-                            "liveClientParams": {
-                                "pmClientType": "kmpLiveRoom",
-                                "pmSession": f"{now_ms2}RETRY",
-                                "liveToken": f"{now_ms2}_{self.live_id}_RT",
-                                "livesource": "PlayBackToLive",
-                                "entryLiveSource": "PlayBackToLive",
-                                "isAD": "0",
-                                "pvid": _hashlib.md5(f"{now_ms2}{u.uid}{self.live_id}".encode("utf-8")).hexdigest()
-                            },
-                            "liveServerParams": {"accountId": self.info.get("accountId",""), "liveId": self.live_id, "status": "1"},
-                            "needEventWhenIgnorePv": "true"
-                        }
-                        jd2 = {
-                            "appKey": "21646297",
-                            "ext": _json.dumps(ext2, ensure_ascii=False),
-                            "from": u.nickname,
-                            "id": u.uid,
-                            "internalExt": "",
-                            "namespace": 1,
-                            "role": 3,
-                            "sdkVersion": "0.3.0",
-                            "tag": "",
-                            "topic": self.info.get("topic",""),
-                            "utdId": nd.utdid
-                        }
-                        data2 = _json.dumps(jd2, ensure_ascii=False)
-                        t2 = str(int(time.time()))
+                        # 使用统一的构造函数重新构造数据并签名
+                        data2, t2 = build_subscribe_data(u, nd, self.info.get("accountId",""), self.live_id, self.info.get("topic",""), "RETRY")
                         ok_sign, sd2 = get_sign(nd, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data2, t2)
                         if ok_sign and isinstance(sd2, dict):
                             try:

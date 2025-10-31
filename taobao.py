@@ -17,11 +17,6 @@ import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
 
-# 全局签名缓存池
-sign_cache = {}
-sign_cache_lock = threading.Lock()
-
-
 # 全局 requests 会话 (复用连接)
 # _session = requests.Session()
 # _session.mount('http://', requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=500, max_retries=1))
@@ -69,26 +64,30 @@ def test_proxy(proxy_str):
         return False, f"❌ 代理连接失败: {str(e)[:100]}"
 
 
-def subscribe_live_msg(
-        device: Device,
-        user: User,
-        account_id: str,
-        live_id: str,
-        topic: str,
-        proxy: str
-):
-    """订阅直播消息 - 同步版本"""
-    # 统一获取时间戳，确保data和请求头的时间戳一致
-    now_seconds = int(time.time())  # 秒级时间戳
+def build_subscribe_data(device: Device, user: User, account_id: str, live_id: str, topic: str, session_suffix: str = ""):
+    """
+    统一构造订阅直播消息的数据结构
+    
+    Args:
+        device: 设备信息
+        user: 用户信息
+        account_id: 账号ID
+        live_id: 直播间ID
+        topic: 主题
+        session_suffix: 会话后缀（用于区分不同场景，如PREHEAT、INSTANT、RETRY等）
+    
+    Returns:
+        tuple: (data_str, seconds) - JSON字符串和时间戳
+    """
+    # 统一获取时间戳
+    now_seconds = int(time.time())
     now = now_seconds * 1000  # 毫秒时间戳
     
     # 添加小的随机偏移（-200ms到+200ms），避免批量请求时间戳完全相同
-    # 注意：偏移范围不能太大，否则会触发 "invalid timestamp" 错误
-    import random
     random_offset = random.randint(-200, 200)
     now = now + random_offset
 
-    pm_session = f"{now}{tools.get_random_string()}"
+    pm_session = f"{now}{tools.get_random_string()}{session_suffix}"
     live_token = f"{now}_{live_id}_{tools.get_random_string(4, True)}"
 
     # 计算 watchId
@@ -117,43 +116,53 @@ def subscribe_live_msg(
         "needEventWhenIgnorePv": "true"
     }
 
-    # 调用 API，传递时间戳确保一致性
+    # 构造完整的请求数据
+    json_data = {
+        "appKey": "21646297",
+        "ext": json.dumps(ext, ensure_ascii=False),
+        "from": user.nickname,
+        "id": user.uid,
+        "internalExt": "",
+        "namespace": 1,
+        "role": 3,
+        "sdkVersion": "0.3.0",
+        "tag": "",
+        "topic": topic,
+        "utdId": device.utdid
+    }
+    
+    data_str = json.dumps(json_data, ensure_ascii=False)
+    return data_str, str(now_seconds)
+
+
+def subscribe_live_msg(
+        device: Device,
+        user: User,
+        account_id: str,
+        live_id: str,
+        topic: str,
+        proxy: str
+):
+    """订阅直播消息 - 同步版本"""
+    # 使用统一的数据构造函数
+    data_str, seconds = build_subscribe_data(device, user, account_id, live_id, topic)
+    
+    # 调用 API
     result = call_app_api(
         device,
         user,
-        {
-            "appKey": "21646297",
-            "ext": json.dumps(ext, ensure_ascii=False),
-            "from": user.nickname,
-            "id": user.uid,
-            "internalExt": "",
-            "namespace": 1,
-            "role": 3,
-            "sdkVersion": "0.3.0",
-            "tag": "",
-            "topic": topic,
-            "utdId": device.utdid
-        },
+        data_str,  # 现在传入字符串
         "mtop.taobao.powermsg.msg.subscribe",
         "1.0",
         proxy,
-        now_seconds  # 传递秒级时间戳
+        int(seconds)  # 传递秒级时间戳
     )
     logger.debug(f"订阅直播消息结果: {result}")
     return result
 
 
 def get_sign(device: Device, user: User, api, v, data, t):
-    """获取签名 - 同步版本，带缓存"""
-    # 生成缓存key
-    cache_key = f"{api}_{data}_{t}_{device.utdid}_{user.uid}"
-
-    # 检查缓存
-    with sign_cache_lock:
-        if cache_key in sign_cache:
-            return True, sign_cache[cache_key]
-
-    start_time = time.time()
+    """获取签名 - 同步版本"""
     json_data = {
         "utdid": device.utdid,
         "umt": device.umt,
@@ -171,7 +180,7 @@ def get_sign(device: Device, user: User, api, v, data, t):
 
     # 不重试，直接请求
     try:
-        resp = requests.post("http://localhost:9001/api/taobao/sign",
+        resp = requests.post("http://192.168.31.130:9001/api/taobao/sign",
                              headers={"content-type": "application/json"},
                              json=json_data,
                              timeout=3)
@@ -180,14 +189,6 @@ def get_sign(device: Device, user: User, api, v, data, t):
             return False, f"算法服务错误(HTTP {resp.status_code})"
 
         result = resp.json()
-
-        # 缓存结果
-        with sign_cache_lock:
-            sign_cache[cache_key] = result
-            # 限制缓存大小
-            if len(sign_cache) > 1000:
-                sign_cache.clear()
-
         return True, result
         
     except requests.exceptions.Timeout:
@@ -232,9 +233,7 @@ def call_app_api(
             "x-extdata": "openappkey%3DDEFAULT_AUTH",
             "x-features": "27",
             "x-mini-wua": urllib.parse.quote(sign_data["miniwua"]),
-            "x-nq": "WiFi",  # 网络质量
             "x-pv": "6.3",
-            "x-region-channel": "CN",  # 地区渠道
             "x-sgext": urllib.parse.quote(sign_data["sgext"]),
             "x-sid": user.sid,
             "x-sign": urllib.parse.quote(sign_data["sign"]),
