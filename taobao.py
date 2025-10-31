@@ -64,13 +64,13 @@ def test_proxy(proxy_str):
         return False, f"❌ 代理连接失败: {str(e)[:100]}"
 
 
-def build_subscribe_data(device: Device, user: User, account_id: str, live_id: str, topic: str):
+def build_subscribe_data(user: User, device: Device, account_id: str, live_id: str, topic: str):
     """
     统一构造订阅直播消息的数据结构
     
     Args:
-        device: 设备信息
         user: 用户信息
+        device: 设备信息
         account_id: 账号ID
         live_id: 直播间ID
         topic: 主题
@@ -149,7 +149,7 @@ def subscribe_live_msg(
 ):
     """订阅直播消息 - 同步版本"""
     # 使用统一的数据构造函数
-    data_str, seconds = build_subscribe_data(device, user, account_id, live_id, topic)
+    data_str, seconds = build_subscribe_data(user, device, account_id, live_id, topic)
     
     # 调用 API
     result = call_app_api(
