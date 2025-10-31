@@ -7,6 +7,7 @@ import os
 from database import save_timestamp
 from model.user import User
 from model.device import Device
+from device_randomizer import get_random_user_agent
 import json
 import time
 import urllib.parse
@@ -236,10 +237,13 @@ def call_app_api(
             print(f"❌ 签名失败 [{device.utdid[:16]}...]: {sign_data[:100]}")
             return False, "签名生成失败"
         
-        # 请求头（保持设备指纹参数不变，只添加GPS等辅助参数）
+        # 获取用户的随机User-Agent（每个用户固定，降低关联性但不影响签名）
+        user_agent = get_random_user_agent(user.uid, use_cache=True)
+        
+        # 请求头（只随机化UA，其他参数固定以保证签名正确）
         headers = {
             "Accept-Encoding": "gzip",
-            "user-agent": "MTOPSDK%2F3.1.1.7+%28Android%3B10%3BXiaomi%3BMIX+2S%29+DeviceType%28Phone%29",
+            "user-agent": user_agent,  # 随机化：不同手机型号（不影响签名）
             "x-app-ver": "10.51.0",
             "x-appkey": "21646297",
             "x-devid": urllib.parse.quote(device.devid),
@@ -387,9 +391,12 @@ async def call_app_api_prepared_async_with_client(
         sign_data: dict
 ):
     """异步版本：使用共享的 httpx.AsyncClient（性能优化版本）"""
+    # 获取用户的随机User-Agent（每个用户固定）
+    user_agent = get_random_user_agent(user.uid, use_cache=True)
+    
     headers = {
         "Accept-Encoding": "gzip",
-        "user-agent": "MTOPSDK%2F3.1.1.7+%28Android%3B10%3BXiaomi%3BMIX+2S%29+DeviceType%28Phone%29",
+        "user-agent": user_agent,  # 随机化：不同手机型号（不影响签名）
         "x-app-ver": "10.51.0",
         "x-appkey": "21646297",
         "x-devid": urllib.parse.quote(device.devid),
