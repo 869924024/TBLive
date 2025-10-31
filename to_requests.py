@@ -5,8 +5,7 @@ import time
 from database import filter_available
 from model.user import User
 from model.device import Device
-from task_batch import AsyncTaskThread
-from taobao import get_sign, subscribe_live_msg_prepared, subscribe_live_msg_prepared_async, subscribe_live_msg_prepared_async_with_client, build_subscribe_data
+from taobao import get_sign, subscribe_live_msg_prepared_async, subscribe_live_msg_prepared_async_with_client, build_subscribe_data
 from proxy_manager import ProxyManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -633,53 +632,6 @@ class Watch:
             import traceback
             traceback.print_exc()
             _finish_task(0, 0)
-        return
-
-        self.log_fun(f"正在载入代理，任务数量: {len(tasks)}")
-        
-        # 根据代理配置设置代理
-        if self.proxy_type == "direct" and self.proxy_value:
-            # 直接填写代理模式：每个任务使用相同的代理（支持{{random}}占位符）
-            self.log_fun(f"🔌 使用直接填写代理模式: {self.proxy_value}")
-            for i, task in enumerate(tasks):
-                # 如果代理中包含{{random}}，为每个任务生成不同的随机字符串
-                proxy_with_random = self.proxy_value.replace('{{random}}', generate_random_string())
-                tasks[i]["proxy"] = proxy_with_random
-        elif self.proxy_type == "url" and self.proxy_value:
-            # API URL模式：从URL获取代理列表
-            self.log_fun(f"🔌 使用API代理模式，正在拉取代理...")
-            try:
-                proxies = self.get_proxys(len(tasks))
-                if len(proxies) < len(tasks):
-                    self.log_fun(f"⚠️ 代理数量不足: 需要{len(tasks)}个，实际{len(proxies)}个，将重复使用代理")
-                    # 如果代理不够，循环使用
-                    for i, task in enumerate(tasks):
-                        tasks[i]["proxy"] = proxies[i % len(proxies)]
-                else:
-                    for i, task in enumerate(tasks):
-                        tasks[i]["proxy"] = proxies[i]
-                self.log_fun(f"✅ 已分配 {len(proxies)} 个代理")
-            except Exception as e:
-                self.log_fun(f"❌ 获取代理失败: {str(e)}，将使用直连")
-        for i, task in enumerate(tasks):
-            tasks[i]["proxy"] = ''
-        else:
-            # 未配置代理，使用直连
-            self.log_fun(f"⚠️ 未配置代理，将使用直连")
-
-        self.log_fun(f"📋 总任务数: {len(tasks)}")
-
-        # 兼容旧路径：如果仍保留 tasks（理论不会走到此处）
-        self.task_thread = AsyncTaskThread([], max_concurrent=self.thread_nums)
-
-        # 连接信号槽
-        self.task_thread.log_signal.connect(lambda msg: self.log_fun(msg))
-        self.task_thread.progress_signal.connect(lambda status: self._update_progress(ui_widget, status))
-        self.task_thread.finished_signal.connect(lambda result: self._on_finished(ui_widget, result))
-
-        # 启动线程
-        self.task_thread.start()
-        self.log_fun("🚀 任务已启动")
 
     def stop_task(self):
         """停止任务"""

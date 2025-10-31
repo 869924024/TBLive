@@ -375,121 +375,6 @@ def call_app_api(
         return False, "出错" + str(e)
 
 
-def call_app_api_prepared(
-        device: Device,
-        user: User,
-        data_str: str,
-        api: str,
-        v: str,
-        proxy: str,
-        seconds: str,
-        sign_data: dict
-):
-    """已预签名的快速调用：不再请求签名服务，直接突发发送。"""
-    try:
-        # 组装固定头（用户要求除GPS外不随机）
-        # 随机GPS与falco-id（不影响签名）
-        import random
-        longitude = round(random.uniform(100, 120), 6)
-        latitude = round(random.uniform(20, 45), 6)
-        x_location = f"{longitude}%2C{latitude}"
-        falco_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-        x_falco_id = ''.join(random.choices(falco_chars, k=8))
-
-        headers = {
-            "Accept-Encoding": "gzip",
-            "user-agent": "MTOPSDK%2F3.1.1.7+%28Android%3B10%3BXiaomi%3BMIX+2S%29+DeviceType%28Phone%29",
-            "x-app-ver": "10.51.0",
-            "x-appkey": "21646297",
-            "x-devid": urllib.parse.quote(device.devid),
-            "x-extdata": "openappkey%3DDEFAULT_AUTH",
-            "x-features": "27",
-            "x-mini-wua": urllib.parse.quote(sign_data["miniwua"]),
-            "x-pv": "6.3",
-            "x-sgext": urllib.parse.quote(sign_data["sgext"]),
-            "x-sid": user.sid,
-            "x-sign": urllib.parse.quote(sign_data["sign"]),
-            "x-t": seconds,
-            "x-ttid": urllib.parse.quote(device.ttid),
-            "x-uid": user.uid,
-            "x-umt": urllib.parse.quote(device.umt),
-            "x-utdid": urllib.parse.quote(device.utdid),
-            "x-location": x_location,
-            "x-falco-id": x_falco_id,
-            "cookie": user.cookies
-        }
-
-        # 配置代理
-        proxies = None
-        if proxy and proxy != "":
-            proxy_url = proxy
-            if proxy.startswith('socks5://') or proxy.startswith('http://') or proxy.startswith('https://'):
-                proxy_url = proxy
-            elif proxy.count(':') == 3:
-                parts = proxy.split(':')
-                ip, port, username, password = parts[0], parts[1], parts[2], parts[3]
-                proxy_url = f'http://{username}:{password}@{ip}:{port}'
-            elif proxy.count(':') == 1:
-                proxy_url = f'socks5://{proxy}'
-            else:
-                proxy_url = f'socks5://{proxy}'
-            proxies = {
-                'http': proxy_url,
-                'https': proxy_url
-            }
-
-        resp = requests.post(
-            f"https://guide-acs.m.taobao.com/gw/{api}/{v}/",
-            headers=headers,
-            data={'data': data_str},
-            proxies=proxies,
-            timeout=(10, 15)
-        )
-        resp.raise_for_status()
-        response_str = resp.text
-
-        if not response_str:
-            return False, "请求失败"
-
-        json_obj = json.loads(response_str)
-        ret = json_obj.get("ret", [])
-        data = json_obj.get("data", {})
-
-        if not ret:
-            return False, "无返回值"
-        ret_msg = ret[0]
-        if "robot::not a normal request" in ret_msg:
-            th = threading.Thread(target=save_timestamp, args=(device.devid,))
-            th.start()
-            return False, "设备被封禁(robot)"
-        if "SUCCESS::调用成功" not in ret_msg:
-            return False, f"调用失败: {ret_msg}"
-        return True, data
-
-    except Exception as e:
-        return False, f"出错{str(e)}"
-
-
-def subscribe_live_msg_prepared(
-        device: Device,
-        user: User,
-        data_str: str,
-        proxy: str,
-        seconds: str,
-        sign_data: dict
-):
-    return call_app_api_prepared(
-        device,
-        user,
-        data_str,
-        "mtop.taobao.powermsg.msg.subscribe",
-        "1.0",
-        proxy,
-        seconds,
-        sign_data
-    )
-
-
 async def call_app_api_prepared_async_with_client(
         client: httpx.AsyncClient,
         device: Device,
@@ -578,119 +463,6 @@ async def call_app_api_prepared_async_with_client(
     return True, data
 
 
-async def call_app_api_prepared_async(
-        device: Device,
-        user: User,
-        data_str: str,
-        api: str,
-        v: str,
-        proxy: str,
-        seconds: str,
-        sign_data: dict
-):
-    """异步版本：已预签名的快速调用（每次创建新 client）。"""
-    headers = {
-        "Accept-Encoding": "gzip",
-        "user-agent": "MTOPSDK%2F3.1.1.7+%28Android%3B10%3BXiaomi%3BMIX+2S%29+DeviceType%28Phone%29",
-        "x-app-ver": "10.51.0",
-        "x-appkey": "21646297",
-        "x-devid": urllib.parse.quote(device.devid),
-        "x-extdata": "openappkey%3DDEFAULT_AUTH",
-        "x-features": "27",
-        "x-mini-wua": urllib.parse.quote(sign_data["miniwua"]),
-        "x-pv": "6.3",
-        "x-sgext": urllib.parse.quote(sign_data["sgext"]),
-        "x-sid": user.sid,
-        "x-sign": urllib.parse.quote(sign_data["sign"]),
-        "x-t": seconds,
-        "x-ttid": urllib.parse.quote(device.ttid),
-        "x-uid": user.uid,
-        "x-umt": urllib.parse.quote(device.umt),
-        "x-utdid": urllib.parse.quote(device.utdid),
-        "cookie": user.cookies
-    }
-
-    proxy_url = None
-    if proxy and proxy != "":
-        proxy_url = proxy
-        # 如果没有协议前缀，自动添加
-        if not (proxy.startswith('socks5://') or proxy.startswith('http://') or proxy.startswith('https://')):
-            if proxy.count(':') == 3:
-                # IP:PORT:USERNAME:PASSWORD 格式，使用 HTTP 认证代理
-                parts = proxy.split(':')
-                ip, port, username, password = parts[0], parts[1], parts[2], parts[3]
-                proxy_url = f'http://{username}:{password}@{ip}:{port}'
-            elif proxy.count(':') == 1:
-                # IP:PORT 格式，默认使用 HTTP 代理（兼容性最好）
-                proxy_url = f'http://{proxy}'
-            else:
-                # 其他格式，默认使用 HTTP 代理
-                proxy_url = f'http://{proxy}'
-
-    url = f"https://guide-acs.m.taobao.com/gw/{api}/{v}/"
-
-    try:
-        # httpx.AsyncClient 代理参数需要特殊处理
-        # 增加连接池配置，支持超高并发（适配瞬间发送场景）
-        client_kwargs = {
-            "timeout": httpx.Timeout(15.0, connect=10.0),
-            "limits": httpx.Limits(
-                max_connections=10000,        # 最大连接数（支持超大并发）
-                max_keepalive_connections=5000, # 最大保持活动连接数
-                keepalive_expiry=30.0        # 连接保持时间（秒）
-            )
-        }
-        if proxy_url:
-            client_kwargs["proxies"] = proxy_url
-        
-        async with httpx.AsyncClient(**client_kwargs) as client:
-            # 关键：MTOP 期望 application/x-www-form-urlencoded 的 data=data_str 格式
-            resp = await client.post(url, headers=headers, data={'data': data_str})
-            
-            # 检查HTTP状态码
-            if resp.status_code == 503:
-                return False, f"503 Service Unavailable (via={'proxy' if proxy_url else 'direct'})"
-            elif resp.status_code == 417:
-                return False, f"417 Expectation Failed (via={'proxy' if proxy_url else 'direct'})"
-            elif resp.status_code != 200:
-                return False, f"HTTP {resp.status_code} (via={'proxy' if proxy_url else 'direct'})"
-            
-            response_str = resp.text
-    except httpx.ProxyError as e:
-        return False, f"代理错误: {str(e)[:50]}"
-    except httpx.ConnectTimeout as e:
-        return False, f"连接超时: {str(e)[:50]}"
-    except httpx.ReadTimeout as e:
-        return False, f"读取超时: {str(e)[:50]}"
-    except httpx.TimeoutException as e:
-        return False, f"请求超时: {str(e)[:50]}"
-    except Exception as e:
-        return False, f"网络错误: {str(e)[:50]}"
-
-    if not response_str:
-        return False, "请求失败"
-
-    json_obj = json.loads(response_str)
-    ret = json_obj.get("ret", [])
-    data = json_obj.get("data", {})
-
-    if not ret:
-        return False, "无返回值"
-    ret_msg = ret[0]
-    if "robot::not a normal request" in ret_msg:
-        th = threading.Thread(target=save_timestamp, args=(device.devid,))
-        th.start()
-        return False, "设备被封禁(robot)"
-    if "SUCCESS::调用成功" not in ret_msg:
-        return False, f"调用失败: {ret_msg}"
-    
-    # 检查是否有 latestSequenceNrs（直接返回失败，不打印日志）
-    if 'latestSequenceNrs' not in response_str:
-        return False, "无 latestSequenceNrs"
-    
-    return True, data
-
-
 async def subscribe_live_msg_prepared_async(
         device: Device,
         user: User,
@@ -699,16 +471,40 @@ async def subscribe_live_msg_prepared_async(
         seconds: str,
         sign_data: dict
 ):
-    return await call_app_api_prepared_async(
-        device,
-        user,
-        data_str,
-        "mtop.taobao.powermsg.msg.subscribe",
-        "1.0",
-        proxy,
-        seconds,
-        sign_data
-    )
+    """异步版本：每次创建新 client（用于 instant 模式和重试）"""
+    # 配置代理
+    proxy_url = None
+    if proxy and proxy != "":
+        if not (proxy.startswith('socks5://') or proxy.startswith('http://') or proxy.startswith('https://')):
+            if proxy.count(':') == 3:
+                parts = proxy.split(':')
+                ip, port, username, password = parts[0], parts[1], parts[2], parts[3]
+                proxy_url = f'http://{username}:{password}@{ip}:{port}'
+            elif proxy.count(':') == 1:
+                proxy_url = f'http://{proxy}'
+            else:
+                proxy_url = f'http://{proxy}'
+        else:
+            proxy_url = proxy
+    
+    # 创建临时 client
+    client_kwargs = {
+        "timeout": httpx.Timeout(15.0, connect=10.0),
+        "limits": httpx.Limits(
+            max_connections=100,
+            max_keepalive_connections=50,
+            keepalive_expiry=30.0
+        )
+    }
+    if proxy_url:
+        client_kwargs["proxies"] = proxy_url
+    
+    async with httpx.AsyncClient(**client_kwargs) as client:
+        return await call_app_api_prepared_async_with_client(
+            client, device, user, data_str,
+            "mtop.taobao.powermsg.msg.subscribe", "1.0",
+            proxy, seconds, sign_data
+        )
 
 
 async def subscribe_live_msg_prepared_async_with_client(
