@@ -377,7 +377,8 @@ class Watch:
                     targets.append((u, (i + k) % total_dev))
 
         # ⚡ 优化4：提升预热并发数，加快预热速度
-        preheat_workers = max(50, self.thread_nums * 5)  # 至少50并发，或线程数的5倍
+        preheat_workers = max(100, self.thread_nums * 10)  # 提升到至少100并发
+        self.log_fun(f"⚡ 预热并发数: {preheat_workers}")
         with ThreadPoolExecutor(max_workers=preheat_workers) as pre_executor:
             futs = [pre_executor.submit(sign_for_target, u, start_idx) for (u, start_idx) in targets]
             total_targets = len(futs)
@@ -385,7 +386,7 @@ class Watch:
             succ_cnt = 0
             for fut in as_completed(futs):
                 try:
-                    ok, packed = fut.result(timeout=20)
+                    ok, packed = fut.result(timeout=30)  # 缩短超时到10秒
                     if ok and packed:
                         ready.append(packed)
                         succ_cnt += 1
