@@ -64,7 +64,7 @@ def test_proxy(proxy_str):
         return False, f"❌ 代理连接失败: {str(e)[:100]}"
 
 
-def build_subscribe_data(device: Device, user: User, account_id: str, live_id: str, topic: str, session_suffix: str = ""):
+def build_subscribe_data(device: Device, user: User, account_id: str, live_id: str, topic: str):
     """
     统一构造订阅直播消息的数据结构
     
@@ -74,7 +74,6 @@ def build_subscribe_data(device: Device, user: User, account_id: str, live_id: s
         account_id: 账号ID
         live_id: 直播间ID
         topic: 主题
-        session_suffix: 会话后缀（用于区分不同场景，如PREHEAT、INSTANT、RETRY等）
     
     Returns:
         tuple: (data_str, seconds) - JSON字符串和时间戳
@@ -87,7 +86,7 @@ def build_subscribe_data(device: Device, user: User, account_id: str, live_id: s
     random_offset = random.randint(-200, 200)
     now = now + random_offset
 
-    pm_session = f"{now}{tools.get_random_string()}{session_suffix}"
+    pm_session = f"{now}{tools.get_random_string()}"
     live_token = f"{now}_{live_id}_{tools.get_random_string(4, True)}"
 
     # 计算 watchId

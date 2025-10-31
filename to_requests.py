@@ -260,7 +260,7 @@ class Watch:
                 async def _sign_then_shoot(u, d, task_index):
                     nonlocal first_send_time, last_send_time
                     # 使用统一的构造函数
-                    data_str, t_seconds = build_subscribe_data(u, d, account_id, live_id, topic, "INSTANT")
+                    data_str, t_seconds = build_subscribe_data(u, d, account_id, live_id, topic)
 
                     # 在线程池中执行阻塞式签名
                     loop = asyncio.get_running_loop()
@@ -359,7 +359,7 @@ class Watch:
             for step in range(total_dev):
                 d = self.all_available_devices[(start_idx + step) % total_dev]
                 # 使用统一的构造函数
-                data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic, "PREHEAT")
+                data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
                 ok, sign_data_local = get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
                 if ok and isinstance(sign_data_local, dict):
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
@@ -511,7 +511,7 @@ class Watch:
                     for step in range(1, max_retry + 1):
                         nd = self.devices[(base_idx + step) % len(self.devices)]
                         # 使用统一的构造函数重新构造数据并签名
-                        data2, t2 = build_subscribe_data(u, nd, self.info.get("accountId",""), self.live_id, self.info.get("topic",""), "RETRY")
+                        data2, t2 = build_subscribe_data(u, nd, self.info.get("accountId",""), self.live_id, self.info.get("topic",""))
                         ok_sign, sd2 = get_sign(nd, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data2, t2)
                         if ok_sign and isinstance(sd2, dict):
                             try:
