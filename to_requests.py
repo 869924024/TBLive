@@ -2,7 +2,7 @@ from loguru import logger
 
 import tools
 import time
-from database import filter_available
+from database import filter_available, filter_unused_devices, mark_device_used, clean_expired_device_records
 from model.user import User
 from model.device import Device
 from taobao import get_sign, subscribe_live_msg_prepared_async, subscribe_live_msg_prepared_async_with_client, build_subscribe_data
@@ -47,8 +47,15 @@ class Watch:
             if len(items) >= 5:
                 self.devices.append(Device(items[0], items[1], items[2], items[3], items[4]))
 
-        # 先过滤10小时内使用过的设备
+        # 第1步：过滤10小时内被封禁的设备
         available_devices = filter_available(devices=self.devices, isaccount=False, interval_hours=10)
+        
+        # 第2步：过滤10分钟内已使用的设备（避免短时间重复使用）
+        available_devices = filter_unused_devices(available_devices, interval_minutes=10)
+        
+        # 定期清理过期的设备使用记录
+        clean_expired_device_records(interval_minutes=10)
+        
         total_available = len(available_devices)
         
         # 保存所有可用设备（用于预热时自动切换）
@@ -525,6 +532,7 @@ class Watch:
                 return ok, res
 
             tasks = []
+            task_devices = []  # 保存每个任务对应的设备（用于成功后标记）
             task_index = 0
             for u, d, t_seconds, sign_data, data_str in ready:
                 # 获取代理（使用代理池或原始代理）
@@ -533,6 +541,7 @@ class Watch:
                 else:
                     proxy = self.proxy_value
                 tasks.append(_shoot(u, d, t_seconds, sign_data, data_str, proxy))
+                task_devices.append(d)  # 保存设备引用
                 task_index += 1
 
             send_msg = f"📤 ⚡ 开始发送 {len(tasks)} 个任务..."
@@ -563,7 +572,10 @@ class Watch:
             # 统计结果
             self.log_fun("📊 开始统计响应结果...")
             fail_reasons = {}  # 统计失败原因
+            marked_devices = []  # 已标记的设备（用于日志）
             for i, result in enumerate(results):
+                device = task_devices[i]  # 获取对应的设备
+                
                 if isinstance(result, Exception):
                     failed += 1
                     error_msg = str(result)[:50]
@@ -572,6 +584,9 @@ class Watch:
                     ok, res = result
                     if ok:
                         success += 1
+                        # 🔥 成功后标记设备已使用（10分钟内不再使用）
+                        mark_device_used(device.devid)
+                        marked_devices.append(device.devid)
                     else:
                         failed += 1
                         # 记录失败原因
@@ -596,6 +611,11 @@ class Watch:
 
             total_time = time.time() - start_ts
             self.log_fun(f"🏁 全部完成 | 总耗时: {total_time:.2f}s | 成功={success}, 失败={failed}")
+            
+            # 显示设备使用统计
+            if marked_devices:
+                unique_marked = len(set(marked_devices))
+                self.log_fun(f"📝 设备使用记录: 已标记 {unique_marked} 个设备（10分钟内不可重复使用）")
             
             # 返回结果用于更新UI
             return success, failed
