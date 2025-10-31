@@ -363,32 +363,49 @@ class Watch:
         self.log_fun(expect_msg)
         ready = []  # (user, device, seconds, sign_data, data_str)
 
+        # 记录本批次中签名失败的设备（避免重复尝试，但不永久标记）
+        failed_devices_in_batch = set()
+        
         def sign_for_target(u: User, start_idx: int):
-            # 🔥 强制使用指定索引的设备，不轮换到其他设备
-            # 这样可以确保：设备0签名12次，设备1签名12次，而不是都用设备0
+            # 🔥 优先使用指定索引的设备，失败则自动切换到其他设备
             total_dev = len(self.all_available_devices)
             
-            # 只尝试指定索引的设备
+            # 优先尝试指定索引的设备
             d = self.all_available_devices[start_idx % total_dev]
             
-            # 使用统一的构造函数
-            data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
-            ok, sign_data_local = get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
-            if ok and isinstance(sign_data_local, dict):
-                # 🔥 签名成功后立即记录设备使用（10分钟内不可用）
-                # 注意：这里允许同一个设备被多次签名（符合倍数的需求）
-                mark_device_used(d.devid)
-                return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
-            
-            # 如果指定设备签名失败，才尝试其他设备（故障转移）
-            for step in range(1, min(10, total_dev)):  # 最多尝试10个其他设备
-                d = self.all_available_devices[(start_idx + step) % total_dev]
+            # 跳过本批次中已经失败过的设备
+            if d.devid not in failed_devices_in_batch:
                 data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
                 ok, sign_data_local = get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
                 if ok and isinstance(sign_data_local, dict):
+                    # 签名成功：记录设备使用（10分钟黑名单）
                     mark_device_used(d.devid)
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
+                else:
+                    # 签名失败：只记录在本批次失败列表，不加入永久黑名单
+                    failed_devices_in_batch.add(d.devid)
+                    logger.warning(f"⚠️ 设备 {d.devid[:20]}... 签名失败，本批次跳过")
             
+            # 如果指定设备失败或已在失败列表，尝试其他可用设备（故障转移）
+            for step in range(1, total_dev):
+                d = self.all_available_devices[(start_idx + step) % total_dev]
+                
+                # 跳过本批次中已经失败过的设备
+                if d.devid in failed_devices_in_batch:
+                    continue
+                
+                data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
+                ok, sign_data_local = get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
+                if ok and isinstance(sign_data_local, dict):
+                    # 成功：记录设备使用（10分钟黑名单）
+                    mark_device_used(d.devid)
+                    logger.info(f"✅ 切换到设备 {d.devid[:20]}... 签名成功")
+                    return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
+                else:
+                    # 失败：记录在本批次失败列表
+                    failed_devices_in_batch.add(d.devid)
+            
+            # 所有设备都失败了
             return False, None
 
         # 目标任务（按 user × target_device_count × Multiple_num 构造），并给出设备起点，失败时轮换
