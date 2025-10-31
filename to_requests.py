@@ -367,7 +367,9 @@ class Watch:
         failed_devices_in_batch = set()
         # 记录本批次中已使用的设备（当倍数=1时，确保不重复使用）
         used_devices_in_batch = set()
-        # 线程锁：保护 used_devices_in_batch 的并发访问
+        # 倍数>1时，为每个设备索引缓存成功的备用设备（确保同索引的倍数任务用同一设备）
+        backup_device_cache = {}  # {start_idx: device}
+        # 线程锁：保护并发访问
         devices_lock = threading.Lock()
         
         def sign_for_target(u: User, start_idx: int):
@@ -376,15 +378,14 @@ class Watch:
             # - 倍数 = 1：强制使用不同设备（5个任务用5个不同设备）
             total_dev = len(self.all_available_devices)
             
-            # 🔒 倍数=1时，使用锁保护设备选择和标记过程
+            # 🔒 选择设备（根据倍数策略不同）
             if self.Multiple_num == 1:
+                # 倍数=1：使用锁保护，确保每个任务用不同设备
                 with devices_lock:
-                    # 优先尝试指定索引的设备
                     d = self.all_available_devices[start_idx % total_dev]
                     
                     # 如果该设备已被本批次使用，则必须切换到其他设备
                     if d.devid in used_devices_in_batch:
-                        # 强制使用其他设备（从指定索引的下一个开始找）
                         found = False
                         for step in range(1, total_dev):
                             candidate = self.all_available_devices[(start_idx + step) % total_dev]
@@ -393,42 +394,57 @@ class Watch:
                                 found = True
                                 break
                         if not found:
-                            # 所有设备都被占用或失败了
                             return False, None
                     
-                    # 提前标记该设备（防止其他线程使用）
+                    # 提前标记该设备
                     if d.devid not in failed_devices_in_batch:
-                        used_devices_in_batch.add(d.devid)  # 先占位
+                        used_devices_in_batch.add(d.devid)
                     else:
-                        # 该设备已失败，返回失败
                         return False, None
             else:
-                # 倍数>1时，不需要锁，直接选择设备
-                d = self.all_available_devices[start_idx % total_dev]
+                # 倍数>1：检查是否有缓存的备用设备
+                with devices_lock:
+                    if start_idx in backup_device_cache:
+                        # 使用缓存的设备（该索引的其他倍数任务已找到备用设备）
+                        d = backup_device_cache[start_idx]
+                    else:
+                        # 首次处理该索引，选择原始设备
+                        d = self.all_available_devices[start_idx % total_dev]
             
-            # 跳过本批次中已经失败过的设备
+            # 尝试签名
             if d.devid not in failed_devices_in_batch:
                 data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
                 ok, sign_data_local = get_sign(d, u, "mtop.taobao.powermsg.msg.subscribe", "1.0", data_str_local, t_seconds_local)
                 if ok and isinstance(sign_data_local, dict):
                     # 签名成功：记录设备使用
                     mark_device_used(d.devid)
+                    # 倍数>1时，缓存该索引的成功设备
+                    if self.Multiple_num > 1 and start_idx not in backup_device_cache:
+                        with devices_lock:
+                            backup_device_cache[start_idx] = d
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
                 else:
-                    # 签名失败：移除占位标记，记录失败列表
+                    # 签名失败：处理
                     if self.Multiple_num == 1:
                         with devices_lock:
                             used_devices_in_batch.discard(d.devid)
+                    elif self.Multiple_num > 1:
+                        # 倍数>1时，如果缓存的设备失败，清除缓存
+                        with devices_lock:
+                            if start_idx in backup_device_cache and backup_device_cache[start_idx].devid == d.devid:
+                                del backup_device_cache[start_idx]
                     failed_devices_in_batch.add(d.devid)
                     logger.warning(f"⚠️ 设备 {d.devid[:20]}... 签名失败，本批次跳过")
             
             # 如果指定设备失败，尝试其他可用设备（故障转移）
+            # 🔥 关键：从 start_idx 开始找，确保不同索引的任务找到不同的备用设备
             for step in range(1, total_dev):
-                # 🔒 倍数=1时，加锁选择和标记设备
+                candidate_idx = (start_idx + step) % total_dev
+                candidate = self.all_available_devices[candidate_idx]
+                
+                # 倍数=1时，加锁选择和标记设备
                 if self.Multiple_num == 1:
                     with devices_lock:
-                        candidate = self.all_available_devices[(start_idx + step) % total_dev]
-                        
                         # 跳过已失败或已使用的设备
                         if candidate.devid in failed_devices_in_batch or candidate.devid in used_devices_in_batch:
                             continue
@@ -437,12 +453,11 @@ class Watch:
                         d = candidate
                         used_devices_in_batch.add(d.devid)
                 else:
-                    # 倍数>1时，不加锁
-                    d = self.all_available_devices[(start_idx + step) % total_dev]
-                    
-                    # 跳过已失败的设备
-                    if d.devid in failed_devices_in_batch:
+                    # 倍数>1时，跳过已失败的设备
+                    if candidate.devid in failed_devices_in_batch:
                         continue
+                    
+                    d = candidate
                 
                 # 在锁外执行签名（避免阻塞其他线程太久）
                 data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
@@ -450,6 +465,11 @@ class Watch:
                 if ok and isinstance(sign_data_local, dict):
                     # 成功：记录设备使用
                     mark_device_used(d.devid)
+                    # 倍数>1时，缓存该索引的备用设备
+                    if self.Multiple_num > 1:
+                        with devices_lock:
+                            if start_idx not in backup_device_cache:
+                                backup_device_cache[start_idx] = d
                     logger.info(f"✅ 切换到设备 {d.devid[:20]}... 签名成功")
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
                 else:
