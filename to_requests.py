@@ -367,8 +367,9 @@ class Watch:
         failed_devices_in_batch = set()
         # 记录本批次中已使用的设备（当倍数=1时，确保不重复使用）
         used_devices_in_batch = set()
-        # 倍数>1时，为每个设备索引缓存成功的备用设备（确保同索引的倍数任务用同一设备）
-        backup_device_cache = {}  # {start_idx: device}
+        # 倍数>1时，为每个用户的每个设备索引缓存成功的备用设备
+        # key: (user_id, start_idx), value: device
+        backup_device_cache = {}  # {(uid, start_idx): device}
         # 线程锁：保护并发访问
         devices_lock = threading.Lock()
         
@@ -403,10 +404,11 @@ class Watch:
                         return False, None
             else:
                 # 倍数>1：检查是否有缓存的备用设备
+                cache_key = (u.uid, start_idx)
                 with devices_lock:
-                    if start_idx in backup_device_cache:
+                    if cache_key in backup_device_cache:
                         # 使用缓存的设备（该索引的其他倍数任务已找到备用设备）
-                        d = backup_device_cache[start_idx]
+                        d = backup_device_cache[cache_key]
                     else:
                         # 首次处理该索引，选择原始设备
                         d = self.all_available_devices[start_idx % total_dev]
@@ -419,9 +421,11 @@ class Watch:
                     # 签名成功：记录设备使用
                     mark_device_used(d.devid)
                     # 倍数>1时，缓存该索引的成功设备
-                    if self.Multiple_num > 1 and start_idx not in backup_device_cache:
+                    if self.Multiple_num > 1:
+                        cache_key = (u.uid, start_idx)
                         with devices_lock:
-                            backup_device_cache[start_idx] = d
+                            if cache_key not in backup_device_cache:
+                                backup_device_cache[cache_key] = d
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
                 else:
                     # 签名失败：处理
@@ -430,9 +434,10 @@ class Watch:
                             used_devices_in_batch.discard(d.devid)
                     elif self.Multiple_num > 1:
                         # 倍数>1时，如果缓存的设备失败，清除缓存
+                        cache_key = (u.uid, start_idx)
                         with devices_lock:
-                            if start_idx in backup_device_cache and backup_device_cache[start_idx].devid == d.devid:
-                                del backup_device_cache[start_idx]
+                            if cache_key in backup_device_cache and backup_device_cache[cache_key].devid == d.devid:
+                                del backup_device_cache[cache_key]
                     failed_devices_in_batch.add(d.devid)
                     logger.warning(f"⚠️ 设备 {d.devid[:20]}... 签名失败，本批次跳过")
             
@@ -467,9 +472,10 @@ class Watch:
                     mark_device_used(d.devid)
                     # 倍数>1时，缓存该索引的备用设备
                     if self.Multiple_num > 1:
+                        cache_key = (u.uid, start_idx)
                         with devices_lock:
-                            if start_idx not in backup_device_cache:
-                                backup_device_cache[start_idx] = d
+                            if cache_key not in backup_device_cache:
+                                backup_device_cache[cache_key] = d
                     logger.info(f"✅ 切换到设备 {d.devid[:20]}... 签名成功")
                     return True, (u, d, t_seconds_local, sign_data_local, data_str_local)
                 else:
