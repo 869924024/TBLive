@@ -79,9 +79,7 @@ def build_subscribe_data(device: Device, user: User, account_id: str, live_id: s
         tuple: (data_str, seconds) - JSON字符串和时间戳
     """
     # 统一获取时间戳
-    now_seconds = int(time.time())
-    now = now_seconds * 1000  # 毫秒时间戳
-    
+    now = int(time.time() * 1000)  # 毫秒时间
     # 添加小的随机偏移（-200ms到+200ms），避免批量请求时间戳完全相同
     random_offset = random.randint(-200, 200)
     now = now + random_offset
@@ -131,7 +129,14 @@ def build_subscribe_data(device: Device, user: User, account_id: str, live_id: s
     }
     
     data_str = json.dumps(json_data, ensure_ascii=False)
-    return data_str, str(now_seconds)
+    # 调试：打印构造的数据（只打印第一次）
+    if not hasattr(build_subscribe_data, "_debug_printed"):
+        print(f"[DEBUG] build_subscribe_data 输出示例:")
+        print(f"  data_str 长度: {len(data_str)}")
+        print(f"  seconds: {str(now_seconds)}")
+        print(f"  data_str 前200字符: {data_str[:200]}")
+        build_subscribe_data._debug_printed = True
+    return data_str, str(now)
 
 
 def subscribe_live_msg(
@@ -179,20 +184,25 @@ def get_sign(device: Device, user: User, api, v, data, t):
 
     # 不重试，直接请求
     try:
-        resp = requests.post("http://192.168.31.130:9001/api/taobao/sign",
+        resp = requests.post("http://localhost:9001/api/taobao/sign",
                              headers={"content-type": "application/json"},
                              json=json_data,
                              timeout=3)
+        print(f"签名服务响应状态码: {resp.status_code}, 内容: {resp.text}")
         if resp.status_code != 200:
             # 返回简洁的错误消息，不返回完整的JSON
-            return False, f"算法服务错误(HTTP {resp.status_code})"
+            error_msg = f"算法服务错误(HTTP {resp.status_code})"
+            print(f"❌ 签名请求失败: {error_msg}, 响应内容: {resp.text[:200]}")
+            return False, error_msg
 
         result = resp.json()
         return True, result
         
     except requests.exceptions.Timeout:
+        print(f"❌ 签名请求超时: 算法服务无响应")
         return False, "算法服务超时"
     except Exception as e:
+        print(f"❌ 签名请求异常: {str(e)[:100]}")
         return False, f"算法服务异常: {str(e)[:30]}"
 
 
