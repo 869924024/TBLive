@@ -458,11 +458,21 @@ class Watch:
                         d = candidate
                         used_devices_in_batch.add(d.devid)
                 else:
-                    # 倍数>1时，跳过已失败的设备
-                    if candidate.devid in failed_devices_in_batch:
-                        continue
-                    
-                    d = candidate
+                    # 倍数>1时，需要检查设备是否可用
+                    with devices_lock:
+                        # 跳过已失败的设备
+                        if candidate.devid in failed_devices_in_batch:
+                            continue
+                        
+                        # 🔥 跳过已被其他 start_idx 缓存的设备（确保不同索引用不同设备）
+                        already_cached = any(
+                            cached_dev.devid == candidate.devid 
+                            for cached_dev in backup_device_cache.values()
+                        )
+                        if already_cached:
+                            continue
+                        
+                        d = candidate
                 
                 # 在锁外执行签名（避免阻塞其他线程太久）
                 data_str_local, t_seconds_local = build_subscribe_data(u, d, account_id, live_id, topic)
