@@ -464,6 +464,10 @@ class Gen:
         self.capture_lock = threading.Lock()  # 抓包锁，保护PID添加/移除和数据读取
         self.start_time = None  # 任务开始时间
         self.log_callback = None  # 日志回调函数
+        # 批量清理相关
+        self.created_emulator_count = 0  # 已创建的模拟器总数（包括已删除的）
+        self.cleanup_threshold = 100  # 每创建N个模拟器就清理一次（默认100）
+        self.cleanup_lock = threading.Lock()  # 清理操作的锁
         # 注意：不在这里kill进程，因为任务会正常创建-使用-删除模拟器
     
     def _log(self, message):
@@ -502,6 +506,54 @@ class Gen:
     def set_log_callback(self, callback):
         """设置日志回调函数"""
         self.log_callback = callback
+    
+    def cleanup_idle_emulators(self):
+        """
+        批量清理所有未启动的模拟器
+        使用 delete_all 命令会自动删除所有未运行的模拟器
+        注意：调用此方法前应该已经持有 cleanup_lock
+        """
+        try:
+            self._log("=" * 60)
+            self._log(f"🧹 已创建 {self.cleanup_threshold} 个模拟器，开始批量清理未启动的模拟器...")
+            
+            Mumu = self._get_mumu()
+            if not Mumu:
+                self._log("❌ MuMu 模块导入失败，无法执行清理")
+                return False
+            
+            mm = Mumu()
+            
+            # 使用 delete_all 删除所有模拟器（会自动跳过正在运行的）
+            try:
+                mm.core.delete_all()
+                self._log("✅ 批量清理完成（已自动跳过正在运行的模拟器）")
+                
+                # 等待删除操作完成
+                time.sleep(3)
+                
+                # 重置计数器
+                self.created_emulator_count = 0
+                self._log(f"🔄 计数器已重置，将在下一个 {self.cleanup_threshold} 个模拟器后再次清理")
+                
+            except Exception as e:
+                error_msg = str(e)
+                # 如果是没有模拟器可删除，不算错误
+                if "not found" in error_msg.lower() or "不存在" in error_msg or "no player" in error_msg.lower():
+                    self._log("✓ 没有需要清理的模拟器")
+                    self.created_emulator_count = 0  # 重置计数器
+                else:
+                    self._log(f"⚠️ 批量清理失败: {e}")
+                    return False
+            
+            self._log("=" * 60)
+            return True
+            
+        except Exception as e:
+            self._log(f"❌ 批量清理异常: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def create_emulator_internal(self):
         """内部创建模拟器方法 - 调用者需要持有锁"""
@@ -955,8 +1007,23 @@ class Gen:
                     # task成功返回意味着已经抓到了新设备
                     with self.file_lock:  # 使用锁保护计数器
                         self.success_count += 1
+                        self.created_emulator_count += 1  # 累计创建的模拟器数
                         current = self.success_count
-                    self._log(f"✅ [窗口{worker_id}] 成功生成设备 ({current}/{self.target_count})")
+                        created_total = self.created_emulator_count
+                    
+                    self._log(f"✅ [窗口{worker_id}] 成功生成设备 ({current}/{self.target_count}，累计创建: {created_total})")
+                    
+                    # 检查是否需要批量清理
+                    if created_total >= self.cleanup_threshold and created_total % self.cleanup_threshold == 0:
+                        self._log(f"🔔 [窗口{worker_id}] 触发批量清理条件（已创建 {created_total} 个模拟器）")
+                        # 只让第一个触发的线程执行清理
+                        if self.cleanup_lock.acquire(blocking=False):
+                            try:
+                                self.cleanup_idle_emulators()
+                            finally:
+                                self.cleanup_lock.release()
+                        else:
+                            self._log(f"ℹ️ [窗口{worker_id}] 其他线程正在执行清理，跳过")
                 else:
                     self._log(f"❌ [窗口{worker_id}] 生成失败: {result}")
                 
@@ -1114,6 +1181,7 @@ class Gen:
             
             self._log(f"📋 准备启动 {self.window_count} 个并发窗口，目标生成 {self.target_count} 个设备")
             self._log(f"💡 通过PID区分不同窗口的流量，完全并行，互不干扰！")
+            self._log(f"🧹 自动清理: 每创建 {self.cleanup_threshold} 个模拟器后，自动清理所有未启动的模拟器")
             time.sleep(1)
             
             # 创建工作线程
@@ -1158,17 +1226,20 @@ class Gen:
                 pass
         self.running = False
 
-    def start_task(self, device_count=0, window_count=1):
+    def start_task(self, device_count=0, window_count=1, cleanup_threshold=100):
         """
         启动设备生成任务
         
         Args:
             device_count: 要生成的设备数量，0表示无限循环
             window_count: 并发窗口数
+            cleanup_threshold: 每创建N个模拟器后自动清理未启动的模拟器（默认100）
         """
         self.end = False
         self.target_count = device_count if device_count > 0 else 999999
         self.window_count = max(1, min(window_count, 10))  # 限制在1-10之间
+        self.cleanup_threshold = max(10, cleanup_threshold)  # 最小10个
+        self.created_emulator_count = 0  # 重置计数器
         
         if device_count > 0:
             # 批量生成模式
@@ -1209,11 +1280,14 @@ if __name__ == '__main__':
                         help='要生成的设备数量（默认0表示一直运行）')
     parser.add_argument('-w', '--windows', type=int, default=1, 
                         help='并发窗口数（默认1，范围1-10）')
+    parser.add_argument('-c', '--cleanup', type=int, default=100, 
+                        help='每创建N个模拟器后自动清理未启动的模拟器（默认100）')
     
     args = parser.parse_args()
     
     device_count = args.num
     window_count = args.windows
+    cleanup_threshold = args.cleanup
     
     print("="*60)
     print("🚀 设备参数批量生成工具")
@@ -1223,13 +1297,14 @@ if __name__ == '__main__':
     else:
         print(f"📊 生成数量: 无限循环")
     print(f"🪟 并发窗口: {window_count} 个")
+    print(f"🧹 自动清理: 每 {cleanup_threshold} 个模拟器")
     print("="*60)
     print()
     
     gen = Gen()
     try:
         # 启动批量生成任务
-        gen.start_task(device_count=device_count, window_count=window_count)
+        gen.start_task(device_count=device_count, window_count=window_count, cleanup_threshold=cleanup_threshold)
         
         # 等待任务完成或用户中断
         while gen.running:
