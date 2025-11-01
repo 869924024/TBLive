@@ -50,11 +50,11 @@ class Watch:
         # 第1步：过滤10小时内被封禁的设备
         available_devices = filter_available(devices=self.devices, isaccount=False, interval_hours=10)
         
-        # 第2步：过滤10分钟内已使用的设备（避免短时间重复使用）
-        available_devices = filter_unused_devices(available_devices, interval_minutes=10)
+        # 第2步：过滤12小时内已使用的设备（避免短时间重复使用）
+        available_devices = filter_unused_devices(available_devices, interval_minutes=720)
         
         # 定期清理过期的设备使用记录
-        clean_expired_device_records(interval_minutes=10)
+        clean_expired_device_records(interval_minutes=720)
         
         total_available = len(available_devices)
         
@@ -158,7 +158,7 @@ class Watch:
             
             # 检查设备数量
             if len(self.devices) == 0:
-                err_msg = "❌ 没有可用的设备参数，请检查设备列表或等待12小时后重试"
+                err_msg = "❌ 没有可用的设备参数，请检查设备列表或等待12小时后重试（设备使用冷却时间：12小时）"
                 print(err_msg)
                 self.log_fun(err_msg)
                 _finish_task(0, 0)
@@ -400,11 +400,12 @@ class Watch:
                     mark_device_used(candidate.devid)
                     return True, (u, candidate, t_seconds_local, sign_data_local, data_str_local)
                 else:
-                    # 设备不可用，移除占位，标记失败，继续尝试下一个
+                    # 设备不可用，移除占位，标记失败（加入12小时记录），继续尝试下一个
                     with devices_lock:
                         selected_devices.remove((u, candidate))
                         failed_devices.add(candidate.devid)
-                    logger.warning(f"⚠️ 设备 {candidate.devid[:20]}... 签名失败，尝试下一个")
+                    mark_device_used(candidate.devid)  # 签名失败的设备也加入使用记录
+                    logger.warning(f"⚠️ 设备 {candidate.devid[:20]}... 签名失败，已标记12小时不可用")
             
             # 所有设备都失败了
             return False, None
@@ -418,7 +419,8 @@ class Watch:
                 mark_device_used(device.devid)
                 return True, (u, device, t_seconds_local, sign_data_local, data_str_local)
             else:
-                logger.warning(f"⚠️ 设备 {device.devid[:20]}... 重复签名失败")
+                mark_device_used(device.devid)  # 签名失败的设备也加入使用记录
+                logger.warning(f"⚠️ 设备 {device.devid[:20]}... 重复签名失败，已标记12小时不可用")
                 return False, None
 
         # 🔥 两阶段执行逻辑

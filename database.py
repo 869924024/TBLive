@@ -130,13 +130,13 @@ def mark_device_used(device_id: str):
             raise e
 
 
-def filter_unused_devices(devices: list, interval_minutes: int = 10):
+def filter_unused_devices(devices: list, interval_minutes: int = 720):
     """
     过滤出未使用的设备（或超过指定时间的设备）
     
     Args:
         devices: 设备列表
-        interval_minutes: 时间间隔（分钟），默认10分钟
+        interval_minutes: 时间间隔（分钟），默认720分钟（12小时）
         
     Returns:
         未使用的设备列表
@@ -161,17 +161,22 @@ def filter_unused_devices(devices: list, interval_minutes: int = 10):
             # print(f"设备 {device_id[:16]}... 在 {remaining/60:.1f} 分钟后可用")
     
     if filtered_count > 0:
-        print(f"📋 设备过滤: {len(devices)} 个设备，过滤掉 {filtered_count} 个（{interval_minutes}分钟内已使用），剩余 {len(available)} 个可用")
+        # 根据时间长短选择合适的单位
+        if interval_minutes >= 60:
+            time_str = f"{interval_minutes // 60}小时"
+        else:
+            time_str = f"{interval_minutes}分钟"
+        print(f"📋 设备过滤: {len(devices)} 个设备，过滤掉 {filtered_count} 个（{time_str}内已使用），剩余 {len(available)} 个可用")
     
     return available
 
 
-def clean_expired_device_records(interval_minutes: int = 10):
+def clean_expired_device_records(interval_minutes: int = 720):
     """
     清理过期的设备使用记录（节省空间）
     
     Args:
-        interval_minutes: 时间间隔（分钟）
+        interval_minutes: 时间间隔（分钟），默认720分钟（12小时）
     """
     with _used_devices_lock:
         try:
