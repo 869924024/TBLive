@@ -37,15 +37,19 @@ def get_proxy(url: str, num: int) -> list[str]:
 
 class Watch:
     def __init__(self, cookies=[], devices=[], thread_nums=5, Multiple_num=1, tasks_per_ip=30, use_device_num=0, log_fn=None, proxy_type="",
-                 proxy_value="", live_id="", burst_mode: str = "preheat"):
+                 proxy_value="", live_id="", burst_mode: str = "preheat", on_preheat_complete=None):
         self.users = [User(tools.replace_cookie_item(i, "sgcookie", None)) for i in cookies]
         self.users = filter_available(users=self.users, isaccount=True, interval_hours=10)
 
         self.devices = []
-        for device in devices:
-            items = [item.strip() for item in device.split("\t") if item.strip()]
+        self.device_to_string_map = {}  # 从Device对象到原始设备字符串的映射（用于锁定）
+        for device_str in devices:
+            items = [item.strip() for item in device_str.split("\t") if item.strip()]
             if len(items) >= 5:
-                self.devices.append(Device(items[0], items[1], items[2], items[3], items[4]))
+                device_obj = Device(items[0], items[1], items[2], items[3], items[4])
+                self.devices.append(device_obj)
+                # 建立映射：Device对象 -> 原始设备字符串
+                self.device_to_string_map[device_obj] = device_str
 
         # 第1步：过滤10小时内被封禁的设备
         available_devices = filter_available(devices=self.devices, isaccount=False, interval_hours=10)
@@ -73,8 +77,10 @@ class Watch:
         self.Multiple_num = Multiple_num
         self.tasks_per_ip = tasks_per_ip  # 每个IP分配的任务数
         self.use_device_num = use_device_num  # 使用设备数
+        self.on_preheat_complete = on_preheat_complete  # 预热完成回调
         self.success_num = 0
         self.fail_num = 0
+        self.robot_cookies = set()  # 记录出现 robot 错误的 Cookie UID（用于自动标记）
 
         self.task_thread = None  # Qt后台线程
         self.log_fun = log_fn
@@ -160,6 +166,10 @@ class Watch:
                 print(f"[DEBUG] 恢复UI状态失败: {e}")
         
         try:
+            # 任务开始时，清空 robot_cookies（避免上次任务的值残留）
+            self.robot_cookies = set()
+            logger.debug(f"[Cookie检测] 任务开始，清空 robot_cookies")
+            
             print(f"[DEBUG] _run_task 开始执行")
             print(f"[DEBUG] self.log_fun = {self.log_fun}")
             print(f"[DEBUG] users={len(self.users)}, devices={len(self.devices)}, Multiple_num={self.Multiple_num}")
@@ -546,12 +556,28 @@ class Watch:
             print(warn_msg)
             self.log_fun(warn_msg)
         
-        # 统计使用的唯一设备数
+        # 统计使用的唯一设备数和Cookie数
         unique_devices = set()
+        unique_cookies = set()
+        self.used_device_strings = []  # 存储实际使用的设备字符串列表（用于锁定）
+        self.used_cookie_uids = []  # 存储实际使用的 Cookie UID 列表（用于锁定）
+        used_device_strings_set = set()  # 用于去重
+        used_cookie_uids_set = set()  # 用于去重
         account_stats = {}  # 统计每个账号的签名次数
         for u, d, _, _, _ in ready:
             unique_devices.add(d.devid)
-            account_key = u.uid[:10] + "..."
+            if u.uid:
+                unique_cookies.add(u.uid)
+            # 获取完整的设备字符串（用于锁定）
+            device_str = self.device_to_string_map.get(d, None)
+            if device_str and device_str not in used_device_strings_set:
+                self.used_device_strings.append(device_str)
+                used_device_strings_set.add(device_str)
+            # 获取 Cookie UID（用于锁定）
+            if u.uid and u.uid not in used_cookie_uids_set:
+                self.used_cookie_uids.append(u.uid)
+                used_cookie_uids_set.add(u.uid)
+            account_key = u.uid[:10] + "..." if u.uid else "unknown"
             account_stats[account_key] = account_stats.get(account_key, 0) + 1
         
         ready_msg = f"✅ 预热完成，获得 {len(ready)} 个可用设备参数 (目标: {total_expected})"
@@ -572,6 +598,20 @@ class Watch:
             stats_msg += f"\n   - 状态: ⚠️ 未达标，可能影响效果"
         print(stats_msg)
         self.log_fun(stats_msg)
+        
+        # 调用预热完成回调（用于锁定资源）
+        # 传递设备和Cookie信息：回调函数接收 (used_device_strings, used_cookie_uids)
+        if self.on_preheat_complete:
+            try:
+                # 兼容旧的回调接口（只传递设备）和新接口（传递设备和Cookie）
+                import inspect
+                sig = inspect.signature(self.on_preheat_complete)
+                if len(sig.parameters) >= 2:
+                    self.on_preheat_complete(self.used_device_strings, self.used_cookie_uids)
+                else:
+                    self.on_preheat_complete(self.used_device_strings)  # 兼容旧接口
+            except Exception as e:
+                logger.error(f"预热完成回调失败: {e}")
 
         # 突发异步：使用 asyncio + httpx.AsyncClient 瞬发
         burst_start = "🚀 突发发送开始（asyncio，不等待前序返回）..."
@@ -719,23 +759,36 @@ class Watch:
             # 统计结果
             self.log_fun("📊 开始统计响应结果...")
             fail_reasons = {}  # 统计失败原因
+            result_to_cookie_map = []  # 记录每个结果对应的 Cookie UID（用于后续查找）
+            
             for i, result in enumerate(results):
+                # 获取对应的用户（用于后续查找 robot Cookie）
+                user = None
+                if i < len(ready):
+                    user = ready[i][0]  # ready 中存储的是 (user, device, ...)
+                
                 if isinstance(result, Exception):
                     failed += 1
                     error_msg = str(result)[:50]
                     fail_reasons[error_msg] = fail_reasons.get(error_msg, 0) + 1
+                    # 记录这个结果对应的 Cookie UID（如果失败且包含 robot）
+                    result_to_cookie_map.append((error_msg, user.uid if user and user.uid else None))
                 elif isinstance(result, tuple) and len(result) == 2:
                     ok, res = result
                     if ok:
                         success += 1
+                        result_to_cookie_map.append((None, user.uid if user and user.uid else None))  # 成功，不需要记录
                     else:
                         failed += 1
                         # 记录失败原因
                         error_msg = str(res)[:50] if res else "未知错误"
                         fail_reasons[error_msg] = fail_reasons.get(error_msg, 0) + 1
+                        # 记录这个结果对应的 Cookie UID（失败）
+                        result_to_cookie_map.append((error_msg, user.uid if user and user.uid else None))
                 else:
                     failed += 1
                     fail_reasons["返回格式错误"] = fail_reasons.get("返回格式错误", 0) + 1
+                    result_to_cookie_map.append(("返回格式错误", user.uid if user and user.uid else None))
                 
                 # 定期打印进度
                 completed = i + 1
@@ -749,6 +802,52 @@ class Watch:
                 for reason, count in sorted(fail_reasons.items(), key=lambda x: x[1], reverse=True):
                     self.log_fun(f"  • {reason}: {count}次")
                 self.log_fun("=" * 60)
+            
+            # ===== 只有在失败原因统计中明确出现 robot 相关错误时，才标记对应的 Cookie =====
+            robot_cookies_set = set()
+            
+            # 检查失败原因统计中是否有 robot 相关错误
+            has_robot_error = False
+            robot_error_patterns = [
+                "设备被封禁(robot)",
+                "robot::not a normal request",
+                "robot::not a normal",
+                "被封禁(robot)",
+                "封禁(robot)"
+            ]
+            
+            for reason in fail_reasons.keys():
+                reason_lower = reason.lower()
+                # 只在失败原因统计中明确出现 robot 相关错误时才标记
+                if any(pattern in reason for pattern in robot_error_patterns) or "robot" in reason_lower:
+                    has_robot_error = True
+                    logger.info(f"[Cookie检测] 失败原因统计中发现 robot 相关错误: {reason}")
+                    break
+            
+            # 只有在失败原因统计中明确出现 robot 相关错误时，才查找对应的 Cookie
+            if has_robot_error:
+                logger.info(f"[Cookie检测] 失败原因统计中发现 robot 错误，开始查找对应的 Cookie...")
+                for error_msg, cookie_uid in result_to_cookie_map:
+                    if error_msg and cookie_uid:
+                        error_msg_lower = error_msg.lower()
+                        # 只有当这个具体的错误信息包含 robot 时，才标记对应的 Cookie
+                        if any(pattern in error_msg for pattern in robot_error_patterns) or "robot" in error_msg_lower:
+                            robot_cookies_set.add(cookie_uid)
+                            logger.debug(f"[Cookie检测] 检测到 robot 错误，Cookie UID: {cookie_uid[:10]}...，错误信息: {error_msg}")
+                
+                # 记录出现 robot 错误的 Cookie
+                if robot_cookies_set:
+                    self.robot_cookies = robot_cookies_set
+                    self.log_fun(f"⚠️ 检测到 {len(robot_cookies_set)} 个 Cookie 出现 robot 错误，将在任务完成后自动标记为失效")
+                    logger.warning(f"[Cookie检测] 检测到 {len(robot_cookies_set)} 个 Cookie 出现 robot 错误: {list(robot_cookies_set)[:5]}")
+                else:
+                    # 虽然统计中有 robot 错误，但没有找到对应的 Cookie（可能是设备错误，不是 Cookie 错误）
+                    self.robot_cookies = set()
+                    logger.info(f"[Cookie检测] 统计中有 robot 错误，但没有找到对应的 Cookie（可能是设备错误）")
+            else:
+                # 没有 robot 错误，清空 robot_cookies
+                self.robot_cookies = set()
+                logger.info(f"[Cookie检测] 失败原因统计中没有 robot 相关错误，不标记 Cookie（成功={success}, 失败={failed}）")
 
             total_time = time.time() - start_ts
             self.log_fun(f"🏁 全部完成 | 总耗时: {total_time:.2f}s | 成功={success}, 失败={failed}")

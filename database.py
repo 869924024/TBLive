@@ -8,8 +8,10 @@ from model.device import Device
 
 CACHE_FILE = 'task_timestamps.json'
 USED_DEVICES_FILE = 'used_devices.json'  # 已使用的设备记录
+BANNED_COOKIES_FILE = 'banned_cookies.json'  # 被封禁的 Cookie 记录（robot 检测）
 _file_lock = Lock()
 _used_devices_lock = Lock()
+_banned_cookies_lock = Lock()  # 被封禁 Cookie 记录的锁
 
 
 def load_cache():
@@ -65,14 +67,21 @@ def save_timestamp(_id):
 
 
 def filter_available(users=[User], devices=[Device], isaccount=False, interval_hours=10):
-    """过滤出可执行的账户"""
+    """过滤出可执行的账户（排除被封禁的 Cookie）"""
     cache = load_cache()
     current_time = time.time()
     threshold = interval_hours * 3600
+    
+    # 加载被封禁的 Cookie 列表
+    banned_cookies = load_banned_cookies()
 
     available = []
     if isaccount:
         for user in users:
+            # 检查是否被封禁
+            if user.uid in banned_cookies:
+                continue  # 跳过被封禁的 Cookie
+            # 检查是否在冷却期
             if user.uid not in cache or (current_time - cache[user.uid]) >= threshold:
                 available.append(user)
     else:
@@ -206,3 +215,101 @@ def clean_expired_device_records(interval_minutes: int = 720):
         
         except Exception as e:
             print(f"清理设备记录时出错: {e}")
+
+
+# ==================== Cookie 封禁记录功能 ====================
+
+def load_banned_cookies():
+    """读取被封禁的 Cookie UID 列表"""
+    with _banned_cookies_lock:
+        if not Path(BANNED_COOKIES_FILE).exists():
+            return set()
+        
+        try:
+            with open(BANNED_COOKIES_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # 如果是列表，转换为集合；如果是字典，提取键
+                if isinstance(data, list):
+                    return set(data)
+                elif isinstance(data, dict):
+                    # 如果存储格式是 {uid: timestamp}，提取所有键
+                    return set(data.keys())
+                else:
+                    return set()
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"警告: 被封禁Cookie记录文件损坏，已重建。错误: {e}")
+            return set()
+
+
+def mark_cookie_banned(cookie_uid: str):
+    """
+    标记 Cookie 为被封禁（robot 检测）
+    
+    Args:
+        cookie_uid: Cookie 的 UID (unb)
+    """
+    if not cookie_uid:
+        return False
+    
+    with _banned_cookies_lock:
+        try:
+            if Path(BANNED_COOKIES_FILE).exists():
+                with open(BANNED_COOKIES_FILE, 'r', encoding='utf-8') as f:
+                    banned_cookies = json.load(f)
+            else:
+                banned_cookies = {}
+            
+            # 如果之前是列表格式，转换为字典
+            if isinstance(banned_cookies, list):
+                banned_cookies = {uid: time.time() for uid in banned_cookies}
+            
+            # 记录封禁时间
+            banned_cookies[cookie_uid] = time.time()
+            
+            # 原子写入
+            temp_file = BANNED_COOKIES_FILE + '.tmp'
+            try:
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(banned_cookies, f, indent=2, ensure_ascii=False)
+                Path(temp_file).replace(BANNED_COOKIES_FILE)
+                return True
+            except Exception as e:
+                if Path(temp_file).exists():
+                    Path(temp_file).unlink()
+                raise e
+        except Exception as e:
+            print(f"标记 Cookie 被封禁时出错: {e}")
+            return False
+
+
+def mark_cookies_banned(cookie_uids: list):
+    """
+    批量标记多个 Cookie 为被封禁
+    
+    Args:
+        cookie_uids: Cookie UID 列表
+    """
+    if not cookie_uids:
+        return 0
+    
+    count = 0
+    for uid in cookie_uids:
+        if mark_cookie_banned(uid):
+            count += 1
+    return count
+
+
+def is_cookie_banned(cookie_uid: str) -> bool:
+    """
+    检查 Cookie 是否被封禁
+    
+    Args:
+        cookie_uid: Cookie 的 UID
+    
+    Returns:
+        bool: True 表示被封禁
+    """
+    if not cookie_uid:
+        return False
+    banned_cookies = load_banned_cookies()
+    return cookie_uid in banned_cookies

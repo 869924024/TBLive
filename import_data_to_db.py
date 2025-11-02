@@ -6,8 +6,6 @@
 import pymysql
 import re
 import sys
-import math
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # ============================================
@@ -19,7 +17,10 @@ DB_CONFIG = {
     'user': 'tb_live',
     'password': 'hjj2819597',  # 修改为你的数据库密码
     'database': 'tb_live',         # 修改为你的数据库名
-    'charset': 'utf8mb4'
+    'charset': 'utf8mb4',
+    'connect_timeout': 60,      # 连接超时60秒
+    'read_timeout': 300,        # 读取超时300秒（5分钟）
+    'write_timeout': 300,       # 写入超时300秒（5分钟）
 }
 
 
@@ -32,125 +33,111 @@ def extract_uid_from_cookie(cookie):
     return None
 
 
-def _run_batch_insert(insert_sql: str, params_batch: list[tuple]) -> tuple[int, int]:
-    """在独立连接中执行一批插入，返回(成功数, 跳过数)"""
+def _sequential_bulk_insert_devices(params: list[tuple], batch_size: int = 50, label: str = "进度") -> tuple[int, int]:
+    """单连接批量插入设备（INSERT IGNORE方式），返回(成功数, 跳过数)。"""
+    if not params:
+        return 0, 0
+    
+    total = len(params)
+    total_batches = (total + batch_size - 1) // batch_size
+    print(f"  {label}: 单连接批量导入 — 共 {total_batches} 批，每批 {batch_size}", flush=True)
+    
     conn = None
+    success_total = 0
+    retry_count = 0
+    max_retries = 3
+    
     try:
         conn = pymysql.connect(**DB_CONFIG)
         cursor = conn.cursor()
         conn.autocommit(False)
-        affected = cursor.executemany(insert_sql, params_batch)
-        conn.commit()
-        return affected, len(params_batch) - affected
-    except Exception as e:
-        if conn:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-        print(f"  ⚠️ 批量执行失败: {str(e)[:200]}")
-        return 0, len(params_batch)
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
-
-
-def _parallel_bulk_insert(params: list[tuple], insert_sql: str, batch_size: int = 500, max_workers: int = 8, label: str = "进度") -> tuple[int, int]:
-    """并发批量插入工具。返回(成功数, 跳过数)。"""
-    if not params:
-        return 0, 0
-    # 切批
-    batches = []
-    for i in range(0, len(params), batch_size):
-        batches.append(params[i:i + batch_size])
-    total_batches = len(batches)
-    print(f"  {label}: 已启动并发导入 — 共 {total_batches} 批，每批 {batch_size}，线程 {max_workers}", flush=True)
-    done_batches = 0
-    success_total = 0
-    skip_total = 0
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = [ex.submit(_run_batch_insert, insert_sql, b) for b in batches]
-        for fut in as_completed(futures):
-            ok, skip = fut.result()
-            done_batches += 1
-            success_total += ok
-            skip_total += skip
-            processed = min(done_batches * batch_size, len(params))
-            print(f"  {label}: 批次 {done_batches}/{total_batches} | 行 {processed}/{len(params)}", flush=True)
-    return success_total, skip_total
-
-
-def _sequential_bulk_insert_devices(params: list[tuple], client_id, batch_size: int = 1000, label: str = "进度") -> tuple[int, int]:
-    """设备批量插入（临时表 + 去重），返回(成功数, 跳过数)。"""
-    if not params:
-        return 0, 0
-    conn = None
-    success_total = 0
-    skip_total = 0
-    try:
-        conn = pymysql.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-        conn.autocommit(False)
-
-        total = len(params)
-        total_batches = (total + batch_size - 1) // batch_size
-        print(f"  {label}: 单线程批量导入 — 共 {total_batches} 批，每批 {batch_size}", flush=True)
-
-        # 创建临时表（会话级，自动销毁）
-        cursor.execute("""
-            CREATE TEMPORARY TABLE tmp_devices (
-                client_id INT,
-                devid VARCHAR(64),
-                miniwua VARCHAR(2000),
-                sgext VARCHAR(2000),
-                umt VARCHAR(2000),
-                utdid VARCHAR(100),
-                status TINYINT DEFAULT 1,
-                INDEX idx_devid (devid)
-            ) ENGINE=InnoDB
-        """)
-        conn.commit()
-
-        for batch_index in range(total_batches):
-            start = batch_index * batch_size
+        
+        # 分批插入，使用 INSERT IGNORE 自动跳过重复
+        for batch_idx in range(total_batches):
+            start = batch_idx * batch_size
             end = min(start + batch_size, total)
             batch = params[start:end]
-            try:
-                # 先批量插入临时表
-                cursor.executemany(
-                    "INSERT INTO tmp_devices (client_id, devid, miniwua, sgext, umt, utdid, status) VALUES (%s, %s, %s, %s, %s, %s, 1)",
-                    batch
-                )
-                conn.commit()
-            except Exception as e:
-                conn.rollback()
-                print(f"  ⚠️ 批 {batch_index+1}/{total_batches} 失败: {str(e)[:200]}")
-            processed = end
-            print(f"  {label}: 批次 {batch_index+1}/{total_batches} | 行 {processed}/{total}", flush=True)
-
-        # 一次性从临时表插入目标表（去重）
-        cursor.execute("""
-            INSERT INTO tb_devices (client_id, devid, miniwua, sgext, umt, utdid, status)
-            SELECT t.client_id, t.devid, t.miniwua, t.sgext, t.umt, t.utdid, t.status
-            FROM tmp_devices t
-            LEFT JOIN tb_devices d ON t.devid = d.devid
-            WHERE d.id IS NULL
-        """)
-        success_total = cursor.rowcount
+            
+            # 每5批ping一次连接，保持活跃
+            if batch_idx > 0 and batch_idx % 5 == 0:
+                try:
+                    conn.ping(reconnect=True)
+                except Exception as e:
+                    print(f"  ⚠️ 连接ping失败: {e}，尝试重连...")
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    conn = pymysql.connect(**DB_CONFIG)
+                    cursor = conn.cursor()
+                    conn.autocommit(False)
+            
+            # 重试机制
+            batch_success = False
+            for attempt in range(max_retries):
+                try:
+                    # 逐条插入，更稳定（虽然慢一点）
+                    affected = 0
+                    for row in batch:
+                        try:
+                            cursor.execute(
+                                """INSERT IGNORE INTO tb_devices 
+                                   (client_id, devid, miniwua, sgext, umt, utdid, status) 
+                                   VALUES (%s, %s, %s, %s, %s, %s, 1)""",
+                                row
+                            )
+                            affected += cursor.rowcount
+                        except Exception as row_err:
+                            # 单条失败不影响整体
+                            continue
+                    
+                    conn.commit()
+                    success_total += affected
+                    batch_success = True
+                    break  # 成功后跳出重试循环
+                    
+                except Exception as e:
+                    retry_count += 1
+                    print(f"  ⚠️ 批次 {batch_idx+1} 第{attempt+1}次尝试失败: {str(e)[:100]}")
+                    try:
+                        conn.rollback()
+                    except:
+                        pass
+                    
+                    # 如果不是最后一次尝试，重连
+                    if attempt < max_retries - 1:
+                        try:
+                            conn.close()
+                        except:
+                            pass
+                        import time
+                        time.sleep(1)  # 等待1秒再重连
+                        conn = pymysql.connect(**DB_CONFIG)
+                        cursor = conn.cursor()
+                        conn.autocommit(False)
+            
+            if not batch_success:
+                print(f"  ❌ 批次 {batch_idx+1} 重试{max_retries}次后仍失败，跳过")
+            
+            # 每5批或最后一批打印进度
+            if (batch_idx + 1) % 5 == 0 or batch_idx == total_batches - 1:
+                print(f"  {label}: 批次 {batch_idx+1}/{total_batches} | 行 {end}/{total} | 成功 {success_total}", flush=True)
+        
         skip_total = total - success_total
-        conn.commit()
-        print(f"  {label}: 去重合并完成，成功={success_total}，跳过={skip_total}", flush=True)
-
+        print(f"  {label}: 导入完成，成功={success_total}，跳过={skip_total}，重试次数={retry_count}", flush=True)
         return success_total, skip_total
+        
+    except Exception as e:
+        print(f"  ⚠️ 整体导入失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return success_total, total - success_total
     finally:
-        try:
-            if conn:
+        if conn:
+            try:
                 conn.close()
-        except Exception:
-            pass
+            except:
+                pass
 
 
 def _sequential_bulk_insert_cookies(params: list[tuple], client_id, batch_size: int = 1000, label: str = "进度") -> tuple[int, int]:
@@ -257,7 +244,7 @@ def import_cookies_from_file(file_path='账号.txt', client_id=None):
             params.append((client_id, cookie, uid))
 
         # 单线程批量导入（临时表 + 去重）
-        success_count, skip_count = _sequential_bulk_insert_cookies(params, client_id, batch_size=1000, label="Cookie 进度")
+        success_count, skip_count = _sequential_bulk_insert_cookies(params, client_id, batch_size=10, label="Cookie 进度")
         
         print(f"\n✅ 导入完成:")
         print(f"  - 成功: {success_count} 个")
@@ -307,8 +294,9 @@ def import_devices_from_file(file_path='设备.txt', client_id=None):
             devid, miniwua, sgext, umt, utdid = parts[0], parts[1], parts[2], parts[3], parts[4]
             params.append((client_id, devid, miniwua, sgext, umt, utdid))
 
-        # 单线程批量导入（临时表 + 去重）
-        success_count, skip_count = _sequential_bulk_insert_devices(params, client_id, batch_size=100, label="设备 进度")
+        # 单连接批量导入（INSERT IGNORE 方式）
+        # 远程数据库：用更小批次(20)减少网络负担，避免超时
+        success_count, skip_count = _sequential_bulk_insert_devices(params, batch_size=20, label="设备 进度")
         
         print(f"\n✅ 导入完成:")
         print(f"  - 成功: {success_count} 个")
@@ -344,8 +332,8 @@ def show_stats():
         cookie_unassigned = cursor.fetchone()['total']
         
         print(f"🍪 Cookie总数: {cookie_total}")
-        print(f"   - 未分配: {cookie_unassigned}")
-        print(f"   - 已分配: {cookie_total - cookie_unassigned}")
+        print(f"   - 未分配: {cookie_unassigned} 个")
+        print(f"   - 已分配: {cookie_total - cookie_unassigned} 个")
         
         # 设备统计
         cursor.execute("SELECT COUNT(*) as total FROM tb_devices")
@@ -355,8 +343,20 @@ def show_stats():
         device_unassigned = cursor.fetchone()['total']
         
         print(f"📱 设备总数: {device_total}")
-        print(f"   - 未分配: {device_unassigned}")
-        print(f"   - 已分配: {device_total - device_unassigned}")
+        print(f"   - 未分配: {device_unassigned} 个")
+        print(f"   - 已分配: {device_total - device_unassigned} 个")
+        
+        # 未分配数据汇总（醒目显示）
+        if cookie_unassigned > 0 or device_unassigned > 0:
+            print(f"\n{'='*60}")
+            print(f"⚠️  未分配资源汇总:")
+            print(f"{'='*60}")
+            if cookie_unassigned > 0:
+                print(f"🍪 待分配Cookie: {cookie_unassigned} 个")
+            if device_unassigned > 0:
+                print(f"📱 待分配设备: {device_unassigned} 个")
+            print(f"{'='*60}")
+            print(f"💡 提示: 选择选项 5 可以分配数据给客户端")
         
         # 客户端分配统计
         cursor.execute("""
