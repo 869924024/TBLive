@@ -623,7 +623,21 @@ class MainPage(QWidget):
             # 与核心逻辑一致：去掉 sgcookie 影响识别
             c2 = tools.replace_cookie_item(c, "sgcookie", None)
             u = User(c2)
-            if u and u.uid:
+            # 允许没有 UID 的 Cookie 也显示（可能使用其他标识符，如 cookie2/sid）
+            # 如果没有 UID，使用 cookie2 或 sid 作为标识符
+            if u:
+                if not u.uid:
+                    # 尝试使用 cookie2 或 sid 作为标识符
+                    if u.sid:
+                        u.uid = u.sid  # 使用 sid 作为备用标识符
+                    else:
+                        # 如果都没有，使用 cookie2 字段
+                        cookie2 = tools.get_cookie_item_value(c2, "cookie2")
+                        if cookie2:
+                            u.uid = cookie2
+                        else:
+                            # 最后使用 cookie 字符串的前20个字符作为标识符
+                            u.uid = c[:20] if c else "__no_id__"
                 raw_users.append((c, u))
 
         # 去重：按同一 uid 的“最后一次出现”为准（最新导入/更新优先）
@@ -674,9 +688,24 @@ class MainPage(QWidget):
             else:
                 tag = "冷却中"
             
-            display = f"{nick}  unb={u.uid}  [{tag}]"
+            # 显示标识符（优先显示 unb，如果没有则显示 cookie2 或其他）
+            identifier = u.uid if u.uid else (tools.get_cookie_item_value(c, "cookie2") or tools.get_cookie_item_value(c, "sid") or "未知")
+            # 如果是备用标识符（不是 unb），在显示时区分
+            original_uid = tools.get_cookie_item_value(c, "unb")
+            if original_uid:
+                id_display = f"unb={identifier}"
+            else:
+                # 没有 unb，显示使用的备用标识符
+                if tools.get_cookie_item_value(c, "cookie2"):
+                    id_display = f"cookie2={identifier}"
+                elif tools.get_cookie_item_value(c, "sid"):
+                    id_display = f"sid={identifier}"
+                else:
+                    id_display = f"标识={identifier[:20]}..."
+            
+            display = f"{nick}  {id_display}  [{tag}]"
             self.cookie_select.addItem(display)
-            self._cookie_options.append((display, c, u.uid))
+            self._cookie_options.append((display, c, u.uid))  # 使用 u.uid（可能是备用标识符）
 
         # 默认选择第一个"可用"的（排除被封禁的）；若没有，则第一个非封禁的
         default_index = 0
