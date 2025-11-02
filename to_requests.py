@@ -587,7 +587,7 @@ class Watch:
         # 显示详细统计
         stats_msg = f"\n✅ 预热完成汇总:"
         stats_msg += f"\n   - 总签名次数: {len(ready)} 次（目标: {total_expected}）"
-        stats_msg += f"\n   - 使用设备数: {len(unique_devices)} 个不同设备（已标记10分钟内不可用）"
+        stats_msg += f"\n   - 使用设备数: {len(unique_devices)} 个不同设备（已标记12小时内不可用）"
         for acc, count in account_stats.items():
             stats_msg += f"\n   - 账号 {acc}: {count} 次"
         if len(ready) >= total_expected:

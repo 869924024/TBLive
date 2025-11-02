@@ -90,8 +90,8 @@ class ClientUI(FluentWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("淘宝直播刷量客户端 v1.0")
-        self.resize(1200, 1000)
-        
+        self.resize(1200, 1200)
+
         # 数据存储
         self.cookies = []  # Cookie列表
         self.devices = []  # 设备列表
