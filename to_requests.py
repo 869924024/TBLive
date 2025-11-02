@@ -1,4 +1,11 @@
 from loguru import logger
+import logging
+
+# 禁用 httpx 的日志输出（避免刷量时输出过多 HTTP 请求日志）
+httpx_logger = logging.getLogger("httpx")
+httpx_logger.setLevel(logging.WARNING)  # 只显示 WARNING 及以上级别
+httpcore_logger = logging.getLogger("httpcore")  # httpcore 是 httpx 的底层依赖
+httpcore_logger.setLevel(logging.WARNING)
 
 import tools
 import time

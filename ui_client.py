@@ -38,6 +38,14 @@ import tools
 
 def setup_logging():
     """配置日志系统"""
+    # 禁用 httpx 和 httpcore 的日志输出（避免刷量时输出过多 HTTP 请求日志）
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.setLevel(logging.WARNING)  # 只显示 WARNING 及以上级别
+    httpcore_logger = logging.getLogger("httpcore")
+    httpcore_logger.setLevel(logging.WARNING)
+    urllib3_logger = logging.getLogger("urllib3")
+    urllib3_logger.setLevel(logging.WARNING)  # 也禁用 urllib3（requests 的底层依赖）
+    
     # 创建logs目录（如果不存在）
     logs_dir = 'logs'
     if not os.path.exists(logs_dir):
