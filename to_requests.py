@@ -128,15 +128,34 @@ class Watch:
         def _finish_task(success=0, failed=0):
             """统一的任务完成处理，恢复UI状态"""
             try:
-                ui_widget.start_btn.setEnabled(True)
-                ui_widget.stop_btn.setEnabled(False)
-                ui_widget.success_count.setText(str(success))
-                ui_widget.fail_count.setText(str(failed))
+                # 保存统计结果到 Watch 实例
+                self.success_num = success
+                self.fail_num = failed
+                
+                # 尝试更新UI（如果有这些组件的话）
+                if hasattr(ui_widget, 'start_btn') and ui_widget.start_btn is not None:
+                    ui_widget.start_btn.setEnabled(True)
+                if hasattr(ui_widget, 'stop_btn') and ui_widget.stop_btn is not None:
+                    ui_widget.stop_btn.setEnabled(False)
+                
+                # 兼容旧UI（有 success_count 和 fail_count 组件）
+                if hasattr(ui_widget, 'success_count') and hasattr(ui_widget.success_count, 'setText'):
+                    ui_widget.success_count.setText(str(success))
+                if hasattr(ui_widget, 'fail_count') and hasattr(ui_widget.fail_count, 'setText'):
+                    ui_widget.fail_count.setText(str(failed))
+                
                 print(f"[DEBUG] UI状态已恢复: 成功={success}, 失败={failed}")
                 
                 # 任务完成后更新可用设备数
                 if hasattr(ui_widget, 'update_available_devices_display'):
                     ui_widget.update_available_devices_display()
+
+                # 直接通知UI：任务完成，携带成功/失败数
+                if hasattr(ui_widget, 'task_finished_signal') and ui_widget.task_finished_signal is not None:
+                    try:
+                        ui_widget.task_finished_signal.emit(success, failed)
+                    except Exception as _:
+                        pass
             except Exception as e:
                 print(f"[DEBUG] 恢复UI状态失败: {e}")
         
