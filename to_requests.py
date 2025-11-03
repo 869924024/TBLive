@@ -123,6 +123,91 @@ class Watch:
             else:
                 raise
 
+    # ===== 内部工具：按需从服务器补拉设备，并立即设置冷却 =====
+    def _fetch_more_devices(self, ui_widget, need_count: int) -> int:
+        """从服务器补拉设备参数，并合并到 all_available_devices 中（去重+过滤）"""
+        try:
+            if need_count <= 0:
+                return 0
+            api_url = getattr(ui_widget.parent_window, 'api_url', '').rstrip('/')
+            client_key = getattr(ui_widget.parent_window, 'client_key', '')
+            if not api_url or not client_key:
+                self.log_fun("⚠️ 无法补拉设备：缺少接口地址或client_key")
+                return 0
+
+            url = f"{api_url}/api/allocate_resources"
+            data = {
+                'client_key': client_key,
+                'cookie_count': -1,
+                'device_count': need_count,
+                'device_offset': 0,
+                'include_cooldown': False
+            }
+            resp = requests.post(url, json=data, timeout=20)
+            resp.raise_for_status()
+            res = resp.json()
+            if not res.get('success'):
+                self.log_fun(f"⚠️ 补拉设备失败: {res.get('message')}")
+                return 0
+            devices = res.get('data', {}).get('devices', []) or []
+            if not devices:
+                self.log_fun("⚠️ 补拉设备失败：服务器暂无可用设备")
+                return 0
+
+            # 解析为 Device 对象并建立映射
+            new_devices = []
+            new_device_ids = []
+            for d in devices:
+                device_str = d.get('device_string')
+                if not device_str:
+                    continue
+                items = [item.strip() for item in device_str.split("\t") if item.strip()]
+                if len(items) >= 5:
+                    dev_obj = Device(items[0], items[1], items[2], items[3], items[4])
+                    # 去重：根据 devid 过滤已存在
+                    if any(x.devid == dev_obj.devid for x in self.all_available_devices):
+                        continue
+                    self.device_to_string_map[dev_obj] = device_str
+                    new_devices.append(dev_obj)
+                # 记录数据库ID用于冷却
+                if 'id' in d:
+                    new_device_ids.append(d['id'])
+
+            # 服务器侧立即标记冷却，避免被其他客户端抢用
+            try:
+                mark_url = f"{api_url}/api/mark_resources_used"
+                mark_payload = {
+                    'client_key': client_key,
+                    'cookie_ids': [],
+                    'device_ids': new_device_ids,
+                    'cooldown_hours': 12
+                }
+                requests.post(mark_url, json=mark_payload, timeout=15)
+            except Exception:
+                pass
+
+            if not new_devices:
+                return 0
+
+            # 本地过滤：去除冷却中的/12小时内刚使用的（与现有策略一致）
+            filtered = filter_available(devices=new_devices, isaccount=False, interval_hours=10)
+            filtered = filter_unused_devices(filtered, interval_minutes=720)
+
+            # 合并到全量池与当前 devices
+            self.all_available_devices.extend(filtered)
+            self.devices.extend(filtered)
+
+            added = len(filtered)
+            if added > 0:
+                self.log_fun(f"➕ 已补拉 {added} 个设备，当前可用设备池={len(self.all_available_devices)}")
+            return added
+        except Exception as e:
+            try:
+                self.log_fun(f"⚠️ 补拉设备异常: {e}")
+            except Exception:
+                print(f"补拉设备异常: {e}")
+            return 0
+
     def get_proxys(self, num):
         if self.proxy_type == "direct":
             return [self.proxy_value.replace('{{random}}', generate_random_string()) for i in range(num)]
@@ -515,6 +600,46 @@ class Watch:
                     print(prog)
                     self.log_fun(prog)
         
+        # ===== 自动补齐：如果未达到目标数量，循环补拉并继续找设备 =====
+        try:
+            while len(phase1_results) < (len(self.users) * target_device_count):
+                # 单账号时目标就是 target_device_count；多账号时按用户×目标数
+                total_needed = (len(self.users) * target_device_count) - len(phase1_results)
+                need_now = min(200, max(0, total_needed))
+                if need_now <= 0:
+                    break
+                self.log_fun(f"🔄 第一阶段未满，准备补拉 {need_now} 个设备...")
+                added = self._fetch_more_devices(ui_widget, need_now)
+                if added <= 0:
+                    self.log_fun("⚠️ 服务器没有更多可用设备，无法继续补齐")
+                    break
+                # 追加任务，仅为缺口数量创建任务，从新增池起始索引开始
+                total_dev = len(self.all_available_devices)
+                more_tasks = []
+                base_offset = 0
+                for u in self.users:
+                    for i in range(min(need_now, target_device_count)):
+                        more_tasks.append((u, (base_offset + i) % total_dev))
+                    base_offset += need_now
+
+                with ThreadPoolExecutor(max_workers=preheat_workers) as executor:
+                    futs2 = [executor.submit(find_unique_device, u, start_idx) for (u, start_idx) in more_tasks]
+                    for idx, fut in enumerate(as_completed(futs2), 1):
+                        try:
+                            ok, packed = fut.result(timeout=30)
+                            if ok and packed:
+                                phase1_results.append(packed)
+                                ready.append(packed)
+                        except Exception as e:
+                            logger.error(f"第一阶段补齐任务失败: {e}")
+                        if idx % 10 == 0 or idx == len(futs2):
+                            prog2 = f"补齐进度: {idx}/{len(futs2)}, 已找到={len(phase1_results)}"
+                            print(prog2)
+                            self.log_fun(prog2)
+                # 若仍未满足，继续循环
+        except Exception as e:
+            logger.error(f"自动补齐流程异常: {e}")
+
         if not phase1_results:
             fail_msg = "❌ 第一阶段失败：未找到任何可用设备"
             print(fail_msg)
