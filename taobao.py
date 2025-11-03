@@ -195,7 +195,7 @@ def get_sign(device: Device, user: User, api, v, data, t):
 
     # 不重试，直接请求
     try:
-        resp = requests.post("http://localhost:9001/api/taobao/sign",
+        resp = requests.post("http://192.168.31.130:9001/api/taobao/sign",
                              headers={"content-type": "application/json"},
                              json=json_data,
                              timeout=3)

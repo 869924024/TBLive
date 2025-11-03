@@ -7,6 +7,11 @@ from flask import Flask, request, jsonify
 import pymysql
 from datetime import datetime
 import json
+import logging
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -359,6 +364,49 @@ def update_device_status():
         }), 500
 
 
+def cleanup_expired_locks(conn, cursor, timeout_hours=1):
+    """
+    清理超时的锁定（客户端异常退出时遗留的锁定）
+    
+    Args:
+        conn: 数据库连接
+        cursor: 数据库游标
+        timeout_hours: 超时时间（小时），默认1小时
+    """
+    try:
+        # 清理超时的Cookie锁定
+        cursor.execute("""
+            UPDATE tb_cookies 
+            SET is_locked = 0,
+                locked_by_client = NULL,
+                locked_at = NULL
+            WHERE is_locked = 1 
+              AND locked_at < DATE_SUB(NOW(), INTERVAL %s HOUR)
+        """, (timeout_hours,))
+        expired_cookies = cursor.rowcount
+        
+        # 清理超时的设备锁定
+        cursor.execute("""
+            UPDATE tb_devices 
+            SET is_locked = 0,
+                locked_by_client = NULL,
+                locked_at = NULL
+            WHERE is_locked = 1 
+              AND locked_at < DATE_SUB(NOW(), INTERVAL %s HOUR)
+        """, (timeout_hours,))
+        expired_devices = cursor.rowcount
+        
+        if expired_cookies > 0 or expired_devices > 0:
+            conn.commit()
+            logger.info(f"[清理锁定] 已清理 {expired_cookies} 个Cookie和 {expired_devices} 个设备的超时锁定（超过{timeout_hours}小时）")
+            return expired_cookies, expired_devices
+        
+        return 0, 0
+    except Exception as e:
+        logger.error(f"[清理锁定] 清理超时锁定失败: {str(e)}")
+        return 0, 0
+
+
 @app.route('/api/allocate_resources', methods=['POST'])
 def allocate_resources():
     """
@@ -368,6 +416,7 @@ def allocate_resources():
     1. 只查询可用资源，不锁定
     2. 支持分页拉取（offset参数）
     3. 预热时客户端自行筛选，预热后调用lock接口锁定
+    4. 自动清理超时锁定（防止客户端异常退出导致资源永久锁定）
     
     请求参数:
         - client_key: 客户端密钥
@@ -406,6 +455,9 @@ def allocate_resources():
         
         conn = get_db_connection()
         cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # ===== 自动清理超时锁定（防止客户端异常退出导致资源永久锁定）=====
+        cleanup_expired_locks(conn, cursor, timeout_hours=1)  # 清理超过1小时的锁定
         
         # ===== 1. 查询可用Cookie（不锁定）=====
         cookies = []
@@ -712,6 +764,97 @@ def release_resources():
         }), 500
 
 
+@app.route('/api/mark_resources_used', methods=['POST'])
+def mark_resources_used():
+    """
+    标记资源为已使用（不锁定，只更新使用时间和冷却期）- 拉取资源后立即调用
+    
+    特点：
+    1. 不锁定资源（is_locked 不变）
+    2. 更新 last_used_at 为当前时间
+    3. 设置 cooldown_until 为12小时后
+    4. 确保12小时内不会被再次拉取
+    
+    请求参数:
+        - client_key: 客户端密钥
+        - cookie_ids: Cookie ID列表
+        - device_ids: 设备ID列表
+        - cooldown_hours: 冷却时长（小时，默认12）
+    """
+    try:
+        data = request.get_json()
+        client_key = data.get('client_key')
+        cookie_ids = data.get('cookie_ids', [])
+        device_ids = data.get('device_ids', [])
+        cooldown_hours = data.get('cooldown_hours', 12)
+        
+        if not client_key:
+            return jsonify({
+                'success': False,
+                'message': '缺少client_key参数'
+            }), 400
+        
+        # 验证客户端
+        is_valid, client_id, _ = verify_client_key(client_key)
+        if not is_valid:
+            return jsonify({
+                'success': False,
+                'message': '无效的client_key'
+            }), 401
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # ===== 1. 标记Cookie为已使用 =====
+        marked_cookies = 0
+        if cookie_ids:
+            placeholders = ','.join(['%s'] * len(cookie_ids))
+            cursor.execute(f"""
+                UPDATE tb_cookies 
+                SET last_used_at = NOW(),
+                    cooldown_until = DATE_ADD(NOW(), INTERVAL %s HOUR)
+                WHERE id IN ({placeholders})
+                  AND client_id = %s
+                  AND status = 1
+            """, [cooldown_hours] + cookie_ids + [client_id])
+            
+            marked_cookies = cursor.rowcount
+        
+        # ===== 2. 标记设备为已使用 =====
+        marked_devices = 0
+        if device_ids:
+            placeholders = ','.join(['%s'] * len(device_ids))
+            cursor.execute(f"""
+                UPDATE tb_devices 
+                SET last_used_at = NOW(),
+                    cooldown_until = DATE_ADD(NOW(), INTERVAL %s HOUR)
+                WHERE id IN ({placeholders})
+                  AND client_id = %s
+                  AND status = 1
+            """, [cooldown_hours] + device_ids + [client_id])
+            
+            marked_devices = cursor.rowcount
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': f'成功标记 {marked_cookies} 个Cookie，{marked_devices} 个设备为已使用，冷却{cooldown_hours}小时',
+            'data': {
+                'marked_cookies': marked_cookies,
+                'marked_devices': marked_devices
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'服务器错误: {str(e)}'
+        }), 500
+
+
 @app.route('/api/log_task', methods=['POST'])
 def log_task():
     """
@@ -785,6 +928,57 @@ def log_task():
             'data': {
                 'task_log_id': task_log_id,
                 'increment': increment
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'服务器错误: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cleanup_expired_locks', methods=['POST'])
+def cleanup_expired_locks_api():
+    """
+    手动清理超时锁定（供管理员使用）
+    
+    请求参数:
+        - client_key: 客户端密钥（可选，用于验证）
+        - timeout_hours: 超时时间（小时），默认1小时
+    
+    返回:
+        - cleaned_cookies: 清理的Cookie数量
+        - cleaned_devices: 清理的设备数量
+    """
+    try:
+        data = request.get_json() or {}
+        client_key = data.get('client_key')
+        timeout_hours = data.get('timeout_hours', 1)
+        
+        # 如果提供了client_key，验证一下（可选）
+        if client_key:
+            is_valid, client_id, _ = verify_client_key(client_key)
+            if not is_valid:
+                return jsonify({
+                    'success': False,
+                    'message': '无效的client_key'
+                }), 401
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cleaned_cookies, cleaned_devices = cleanup_expired_locks(conn, cursor, timeout_hours)
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': f'成功清理 {cleaned_cookies} 个Cookie和 {cleaned_devices} 个设备的超时锁定',
+            'data': {
+                'cleaned_cookies': cleaned_cookies,
+                'cleaned_devices': cleaned_devices
             }
         })
         

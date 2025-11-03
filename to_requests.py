@@ -192,6 +192,13 @@ class Watch:
             self.log_fun(msg2)
             self.log_fun(msg3)
             
+            # 通知UI更新过滤后的数量显示
+            if hasattr(ui_widget, 'update_filtered_counts'):
+                try:
+                    ui_widget.update_filtered_counts(len(self.users), len(self.devices))
+                except Exception as e:
+                    print(f"[DEBUG] 更新UI过滤后数量失败: {e}")
+            
             # 检查设备数量
             if len(self.devices) == 0:
                 err_msg = "❌ 没有可用的设备参数，请检查设备列表或等待12小时后重试（设备使用冷却时间：12小时）"

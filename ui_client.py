@@ -31,7 +31,7 @@ from qfluentwidgets import (
 )
 
 from to_requests import Watch  # 保持原有逻辑不变
-from database import filter_available, save_timestamp, mark_cookies_banned, is_cookie_banned
+from database import filter_available, save_timestamp
 from model.user import User
 import tools
 
@@ -171,6 +171,9 @@ class ClientUI(FluentWindow):
                     
                     # 更新主页面显示
                     self.main_page.update_data_display()
+                    
+                    # ===== 启动时过滤并更新UI显示的可用数量 =====
+                    self.main_page.update_filtered_counts_on_startup()
         except Exception as e:
             logger.error(f"加载配置失败: {e}")
     
@@ -531,11 +534,75 @@ class MainPage(QWidget):
         return card
     
     def update_data_display(self):
-        """更新数据显示"""
+        """更新数据显示（显示总数，不过滤）"""
         self.cookie_count_label.setText(str(len(self.parent_window.cookies)))
         self.device_count_label.setText(str(len(self.parent_window.devices)))
         # 同步刷新下拉候选
         self.refresh_cookie_select()
+    
+    def update_filtered_counts_on_startup(self):
+        """启动时过滤并更新UI显示的可用数量"""
+        try:
+            # 过滤可用的Cookie
+            cookies = self.parent_window.cookies or []
+            raw_users = []
+            for c in cookies:
+                c2 = tools.replace_cookie_item(c, "sgcookie", None)
+                u = User(c2)
+                if u:
+                    if not u.uid:
+                        if u.sid:
+                            u.uid = u.sid
+                        else:
+                            cookie2 = tools.get_cookie_item_value(c2, "cookie2")
+                            if cookie2:
+                                u.uid = cookie2
+                            else:
+                                u.uid = c[:20] if c else "__no_id__"
+                    raw_users.append((c, u))
+            
+            # 去重
+            seen_uids = set()
+            dedup_users = []
+            for c, u in reversed(raw_users):
+                if u.uid not in seen_uids:
+                    seen_uids.add(u.uid)
+                    dedup_users.append((c, u))
+            
+            # 过滤12小时内使用过的Cookie
+            users = [u for _, u in dedup_users]
+            available_users = filter_available(users=users, isaccount=True, interval_hours=12)
+            available_cookie_count = len(available_users)
+            
+            # 过滤可用的设备
+            devices = self.parent_window.devices or []
+            from model.device import Device
+            device_objs = []
+            for device_str in devices:
+                items = [item.strip() for item in device_str.split("\t") if item.strip()]
+                if len(items) >= 5:
+                    device_obj = Device(items[0], items[1], items[2], items[3], items[4])
+                    device_objs.append(device_obj)
+            
+            # 过滤设备
+            from database import filter_unused_devices
+            available_devices_step1 = filter_available(devices=device_objs, isaccount=False, interval_hours=10)
+            available_devices = filter_unused_devices(available_devices_step1, interval_minutes=720)
+            available_device_count = len(available_devices)
+            
+            # 更新UI显示过滤后的数量
+            self.cookie_count_label.setText(str(available_cookie_count))
+            self.device_count_label.setText(str(available_device_count))
+            
+            logger.info(f"[启动过滤] 过滤后：可用Cookie {available_cookie_count} 个，可用设备 {available_device_count} 个")
+            
+            # 刷新Cookie下拉（只显示可用的）
+            self.refresh_cookie_select()
+            
+        except Exception as e:
+            logger.error(f"[启动过滤] 过滤失败: {str(e)}", exc_info=True)
+            # 如果过滤失败，至少显示总数
+            self.update_data_display()
     
     def on_live_id_changed(self, text):
         """直播间ID输入变化时的处理"""
@@ -661,20 +728,14 @@ class MainPage(QWidget):
         available_users = filter_available(users=[u for _, u in users], isaccount=True, interval_hours=12)
         available_uids = set(u.uid for u in available_users)
 
-        # 优先将未使用的放前面
+        # 只显示可用的Cookie（不显示冷却中的）
         ordered = []
         for c, u in users:
             if u.uid in available_uids:
                 ordered.append((c, u, True))
-        for c, u in users:
-            if u.uid not in available_uids:
-                ordered.append((c, u, False))
 
-        # 填充下拉项
+        # 填充下拉项（只显示可用的）
         for c, u, is_free in ordered:
-            # 检查是否被封禁
-            is_banned = is_cookie_banned(u.uid)
-            
             # 获取昵称并解码 Unicode 转义序列（仅用于显示）
             nick = u.nickname or "(无昵称)"
             if nick != "(无昵称)":
@@ -688,10 +749,8 @@ class MainPage(QWidget):
                     except:
                         pass  # 解码失败就保持原样
             
-            # 优先级：封禁 > 冷却中 > 可用
-            if is_banned:
-                tag = "封禁"
-            elif is_free:
+            # 状态标签：冷却中 > 可用
+            if is_free:
                 tag = "可用"
             else:
                 tag = "冷却中"
@@ -715,25 +774,18 @@ class MainPage(QWidget):
             self.cookie_select.addItem(display)
             self._cookie_options.append((display, c, u.uid))  # 使用 u.uid（可能是备用标识符）
 
-        # 默认选择第一个"可用"的（排除被封禁的）；若没有，则第一个非封禁的
+        # 默认选择第一个可用的（下拉列表现在只包含可用的）
         default_index = 0
-        for idx, (_, c, uid) in enumerate(self._cookie_options):
-            # 只选择可用且未被封禁的
-            if uid in available_uids and not is_cookie_banned(uid):
-                default_index = idx
-                break
-        
-        # 如果没有可用的，至少选择一个非封禁的
-        if default_index == 0:
-            for idx, (_, c, uid) in enumerate(self._cookie_options):
-                if not is_cookie_banned(uid):
-                    default_index = idx
-                    break
-        
         if self._cookie_options:
             self.cookie_select.setCurrentIndex(default_index)
             self.selected_cookie = self._cookie_options[default_index][1]
             self.selected_user_uid = self._cookie_options[default_index][2]
+        else:
+            # 如果没有可用的Cookie，清空选择
+            self.selected_cookie = None
+            self.selected_user_uid = None
+            logger.warning(f"[Cookie选择] 没有可用的Cookie（可能都在冷却期）")
+        
         self.cookie_select.blockSignals(False)
 
     def on_cookie_selected(self, index):
@@ -1021,6 +1073,15 @@ class MainPage(QWidget):
                     on_preheat_complete=on_preheat_complete_callback  # 预热完成回调
                 )
                 
+                # 更新UI显示过滤后的数量（在任务开始前）
+                if hasattr(self.parent_window.watch_instance, 'users'):
+                    filtered_cookie_count = len(self.parent_window.watch_instance.users)
+                    self.update_filtered_counts(filtered_cookie_count, None)
+                
+                if hasattr(self.parent_window.watch_instance, 'devices'):
+                    filtered_device_count = len(self.parent_window.watch_instance.devices)
+                    self.update_filtered_counts(None, filtered_device_count)
+                
                 # 启动任务（任务执行期间不访问数据库）
                 self.parent_window.watch_instance._run_task(self)
                 
@@ -1136,7 +1197,7 @@ class MainPage(QWidget):
 
         # ===== 检测并标记 robot Cookie（任务完成后）=====
         def mark_robot_cookies():
-            """标记出现 robot 错误的 Cookie 为被封禁"""
+            """标记出现 robot 错误的 Cookie 为12小时冷却（和设备一样，不是永久封禁）"""
             try:
                 # 从 Watch 实例获取出现 robot 错误的 Cookie UID
                 robot_cookie_uids = []
@@ -1158,55 +1219,62 @@ class MainPage(QWidget):
                     self.log(f"ℹ️ 本次任务没有检测到 robot 错误，Cookie 状态正常")
                     return  # 没有 robot cookies，无需处理
                 
-                logger.info(f"[Cookie检测] 检测到 {len(robot_cookie_uids)} 个 Cookie 出现 robot 错误，开始标记...")
-                self.log(f"⚠️ 检测到 {len(robot_cookie_uids)} 个 Cookie 出现 robot 错误，正在标记为封禁...")
+                logger.info(f"[Cookie检测] 检测到 {len(robot_cookie_uids)} 个 Cookie 出现 robot 错误，开始标记为12小时冷却...")
+                self.log(f"⚠️ 检测到 {len(robot_cookie_uids)} 个 Cookie 出现 robot 错误，正在标记为12小时冷却...")
                 
-                # 1. 本地标记为被封禁（无论云端还是本地模式都要保存）
-                marked_count = mark_cookies_banned(robot_cookie_uids)
+                # 1. 本地标记为已使用（12小时冷却）
+                marked_count = 0
+                for uid in robot_cookie_uids:
+                    try:
+                        save_timestamp(uid)  # 标记为已使用（12小时冷却）
+                        marked_count += 1
+                    except Exception as e:
+                        logger.warning(f"[Cookie检测] 标记Cookie冷却失败 (UID: {uid[:10]}...): {str(e)}")
+                
                 if marked_count > 0:
-                    self.log(f"🔒 已在本地标记 {marked_count} 个 Cookie 为封禁状态（robot 检测）")
-                    logger.info(f"[Cookie检测] 已在本地标记 {marked_count} 个 Cookie 为封禁状态")
+                    self.log(f"🔒 已在本地标记 {marked_count} 个 Cookie 进入12小时冷却（robot 检测）")
+                    logger.info(f"[Cookie检测] 已在本地标记 {marked_count} 个 Cookie 进入12小时冷却")
                 
-                # 2. 如果是云端模式，同时更新服务器状态（status=2 表示封禁）
+                # 2. 如果是云端模式，同时更新服务器状态（标记为已使用，12小时冷却）
                 if hasattr(self, 'using_server_mode') and self.using_server_mode:
                     if hasattr(self.parent_window, 'client_key') and hasattr(self.parent_window, 'api_url') and self.parent_window.client_key and self.parent_window.api_url:
                         try:
                             api_url = self.parent_window.api_url.rstrip('/')
                             
                             # 根据 Cookie UID 查找对应的 Cookie ID（使用已保存的映射）
-                            cookie_ids_to_update = []
+                            cookie_ids_to_mark = []
                             if hasattr(self.parent_window, 'cookie_ids') and self.parent_window.cookie_ids:
                                 for uid in robot_cookie_uids:
                                     cookie_id = self.parent_window.cookie_ids.get(uid)
                                     if cookie_id:
-                                        cookie_ids_to_update.append(cookie_id)
+                                        cookie_ids_to_mark.append(cookie_id)
                             
-                            # 如果有 Cookie ID，批量更新服务器状态
-                            if cookie_ids_to_update:
-                                updated_count = 0
-                                for cookie_id in cookie_ids_to_update:
-                                    try:
-                                        response = requests.post(
-                                            f"{api_url}/api/update_cookie_status",
-                                            json={
-                                                'client_key': self.parent_window.client_key,
-                                                'cookie_id': cookie_id,
-                                                'status': 2  # 2=封禁
-                                            },
-                                            timeout=10
-                                        )
-                                        response.raise_for_status()
-                                        result = response.json()
-                                        if result.get('success'):
-                                            updated_count += 1
-                                    except Exception as e:
-                                        logger.warning(f"[Cookie检测] 更新Cookie状态失败 (ID: {cookie_id}): {str(e)}")
-                                
-                                if updated_count > 0:
-                                    self.log(f"🔒 云端模式：已在服务器标记 {updated_count} 个 Cookie 为封禁状态")
-                                    logger.info(f"[Cookie检测] 云端模式：已在服务器标记 {updated_count} 个 Cookie 为封禁状态")
-                                else:
-                                    self.log(f"⚠️ 云端模式：服务器更新失败（本地已标记）")
+                            # 如果有 Cookie ID，调用 mark_resources_used 接口标记为已使用（12小时冷却）
+                            if cookie_ids_to_mark:
+                                try:
+                                    mark_response = requests.post(
+                                        f"{api_url}/api/mark_resources_used",
+                                        json={
+                                            'client_key': self.parent_window.client_key,
+                                            'cookie_ids': cookie_ids_to_mark,
+                                            'device_ids': [],
+                                            'cooldown_hours': 12
+                                        },
+                                        timeout=10
+                                    )
+                                    mark_response.raise_for_status()
+                                    mark_result = mark_response.json()
+                                    if mark_result.get('success'):
+                                        updated_count = mark_result.get('data', {}).get('marked_cookies', 0)
+                                        if updated_count > 0:
+                                            self.log(f"🔒 云端模式：已在服务器标记 {updated_count} 个 Cookie 为12小时冷却")
+                                            logger.info(f"[Cookie检测] 云端模式：已在服务器标记 {updated_count} 个 Cookie 为12小时冷却")
+                                    else:
+                                        self.log(f"⚠️ 云端模式：服务器标记失败: {mark_result.get('message')}")
+                                        logger.warning(f"[Cookie检测] 云端模式：服务器标记失败: {mark_result.get('message')}")
+                                except Exception as e:
+                                    logger.error(f"[Cookie检测] 更新服务器状态时出错: {str(e)}", exc_info=True)
+                                    self.log(f"⚠️ 更新服务器状态失败（本地已标记）: {str(e)}")
                             else:
                                 self.log(f"ℹ️ 云端模式：未找到 Cookie ID 映射（本地导入的 Cookie），仅做本地标记")
                                 logger.info(f"[Cookie检测] 云端模式：未找到 Cookie ID 映射，仅做本地标记")
@@ -1214,15 +1282,18 @@ class MainPage(QWidget):
                         except Exception as e:
                             logger.error(f"[Cookie检测] 更新服务器状态时出错: {str(e)}", exc_info=True)
                             self.log(f"⚠️ 更新服务器状态失败（本地已标记）: {str(e)}")
+                else:
+                    # 本地模式：已经通过 save_timestamp 标记了，无需额外操作
+                    pass
                 
-                # 3. 刷新 Cookie 下拉列表（排除被封禁的 Cookie）
+                # 3. 刷新 Cookie 下拉列表（排除冷却期的 Cookie）
                 self.refresh_cookie_select()
                 
-                self.log(f"✅ Cookie 封禁标记完成：{marked_count} 个 Cookie 已标记，下次使用时将自动排除")
+                self.log(f"✅ Cookie 冷却标记完成：{marked_count} 个 Cookie 已标记为12小时冷却，冷却期后将自动恢复")
                 
             except Exception as e:
                 logger.error(f"[Cookie检测] 标记 robot Cookie 时出错: {str(e)}", exc_info=True)
-                self.log(f"⚠️ 标记 Cookie 封禁状态时出错: {str(e)}")
+                self.log(f"⚠️ 标记 Cookie 冷却状态时出错: {str(e)}")
         
         # 在后台线程标记 robot Cookie（不影响UI响应）
         threading.Thread(target=mark_robot_cookies, daemon=True).start()
@@ -1280,103 +1351,8 @@ class MainPage(QWidget):
         release_thread = threading.Thread(target=release_resources_async, daemon=True)
         release_thread.start()
         
-        # ===== 任务完成后：刷新可用数量（UI展示）=====
-        def refresh_available_count():
-            """刷新界面显示的可用Cookie和设备数量"""
-            # 等待释放完成
-            release_thread.join(timeout=5)
-            
-            # 如果配置了API，重新拉取可用数量
-            if self.parent_window.client_key and self.parent_window.api_url:
-                try:
-                    api_url = self.parent_window.api_url.rstrip('/')
-                    # 刷新时拉取所有 Cookie（包括冷却期的），用于完整显示
-                    # 使用 include_cooldown=true 参数，获取所有 is_locked=0 的 Cookie
-                    response = requests.post(
-                        f"{api_url}/api/allocate_resources",
-                        json={
-                            'client_key': self.parent_window.client_key,
-                            'cookie_count': 0,  # 获取所有
-                            'device_count': 0,  # 获取所有
-                            'include_cooldown': True  # 包含冷却期的 Cookie（用于完整显示）
-                        },
-                        timeout=10
-                    )
-                    result = response.json()
-                    
-                    if result.get('success'):
-                        data = result.get('data', {})
-                        cookies_data = data.get('cookies', [])
-                        devices_data = data.get('devices', [])
-                        
-                        # ===== 合并本地 Cookie 和服务器 Cookie（保留本地导入的）=====
-                        server_cookies = [c['cookie'] for c in cookies_data]
-                        server_cookie_uids = set()
-                        for c in cookies_data:
-                            uid = c.get('uid')
-                            if uid:
-                                server_cookie_uids.add(uid)
-                        
-                        # 获取当前本地 Cookie 列表
-                        local_cookies = self.parent_window.cookies or []
-                        
-                        # 提取本地 Cookie 的 UID（用于判断哪些是本地导入的）
-                        local_cookie_uids = set()
-                        for cookie_str in local_cookies:
-                            try:
-                                cookie_normalized = tools.replace_cookie_item(cookie_str, "sgcookie", None)
-                                user = User(cookie_normalized)
-                                if user and user.uid:
-                                    local_cookie_uids.add(user.uid)
-                            except:
-                                continue
-                        
-                        # 保留本地导入的 Cookie（不在服务器上的）
-                        local_only_cookies = []
-                        for cookie_str in local_cookies:
-                            try:
-                                cookie_normalized = tools.replace_cookie_item(cookie_str, "sgcookie", None)
-                                user = User(cookie_normalized)
-                                if user and user.uid and user.uid not in server_cookie_uids:
-                                    # 这个是本地导入的 Cookie，保留它
-                                    local_only_cookies.append(cookie_str)
-                            except:
-                                # 如果解析失败，也保留（可能是格式特殊）
-                                if cookie_str not in server_cookies:
-                                    local_only_cookies.append(cookie_str)
-                        
-                        # 合并：先放服务器 Cookie，再放本地导入的 Cookie
-                        merged_cookies = server_cookies + local_only_cookies
-                        
-                        # 更新本地缓存（合并后的 Cookie 列表）
-                        self.parent_window.cookies = merged_cookies
-                        self.parent_window.devices = [d['device_string'] for d in devices_data]
-                        
-                        # 更新 Cookie ID 映射（只更新服务器 Cookie 的映射）
-                        if not hasattr(self.parent_window, 'cookie_ids'):
-                            self.parent_window.cookie_ids = {}
-                        for c in cookies_data:
-                            cookie_id = c.get('id')
-                            cookie_uid = c.get('uid')
-                            if cookie_uid and cookie_id:
-                                self.parent_window.cookie_ids[cookie_uid] = cookie_id
-                        
-                        self.parent_window.save_config()
-                        
-                        local_count = len(local_only_cookies)
-                        server_count = len(server_cookies)
-                        self.log(f"🔄 可用资源已更新：{len(merged_cookies)} 个Cookie（服务器：{server_count}，本地：{local_count}），{len(self.parent_window.devices)} 个设备")
-                        logger.info(f"[刷新] Cookie 合并完成：服务器 {server_count} 个，本地 {local_count} 个，总计 {len(merged_cookies)} 个")
-                        
-                        # 更新界面显示
-                        self.parent_window.main_page.update_data_display()
-                        # 刷新 Cookie 下拉列表
-                        self.refresh_cookie_select()
-                except Exception as e:
-                    self.log(f"⚠️ 刷新可用数量失败: {str(e)}")
-        
-        # 在后台刷新可用数量
-        threading.Thread(target=refresh_available_count, daemon=True).start()
+        # 注意：不再自动刷新全部资源，因为每次使用完后会手动从云端拉取1个Cookie和200个设备
+        # 如果需要更新数量显示，可以手动点击"远程拉取"按钮
 
         # 只有任务真正执行了（有成功或失败），才获取操作后数据并输出汇总
         if success > 0 or failed > 0:
@@ -1385,14 +1361,8 @@ class MainPage(QWidget):
                 # 先立即拉一次作为基线
                 self.fetch_after_data(live_id)
 
-                # 基于经验：100 次成功 ≈ 1s 传播延迟，但最少3秒
-                base_wait = max(5, math.ceil(success / 100))
-                # 生成轮询节奏（秒）：适度递增，封顶每次 30s，共计不超过 ~180s
-                plan = [base_wait, base_wait, base_wait * 2, base_wait * 3, base_wait * 5]
-                plan = [min(30, v) for v in plan]
-                # 尝试次数与规模挂钩（小单少刷新，大单多刷新），上限 8 次
-                extra = min(3, max(0, math.ceil(success / 500) - 1))
-                plan = plan[: 5 + extra]
+                # 固定检测2次：第一次间隔5秒，第二次间隔10秒
+                plan = [5, 10]
 
                 # 初始化轮询状态
                 self._after_poll_active = True
@@ -1402,7 +1372,7 @@ class MainPage(QWidget):
                 self._after_poll_nochange = 0
 
                 total_est = sum(plan)
-                self.log(f"⏳ 刷新监测已启动：预计 {len(plan)} 次刷新，约 {total_est}s 内稳定")
+                self.log(f"⏳ 刷新监测已启动：预计 {len(plan)} 次刷新，约 {total_est}s 内完成")
                 self._schedule_next_after_poll(live_id)
         else:
             self.log("⚠️ 任务未执行，跳过增量统计")
@@ -1478,8 +1448,8 @@ class MainPage(QWidget):
             self._after_poll_nochange = 0
             self._after_poll_last_increment = current_increment
 
-        # 稳定策略：连续两次无变化则认为已稳定
-        if self._after_poll_nochange >= 2:
+        # 固定检测2次，检测完就停止
+        if self._after_poll_attempt >= len(self._after_poll_intervals):
             self.log("✅ 增量已稳定，停止刷新")
             self._after_poll_active = False
             increment = self.view_count_after - self.view_count_before
@@ -1537,6 +1507,27 @@ class MainPage(QWidget):
     def show_error(self, message):
         """显示错误提示（线程安全）"""
         self.error_signal.emit(message)
+    
+    def update_filtered_counts(self, cookie_count=None, device_count=None):
+        """更新过滤后的数量显示（可在后台线程调用，但需要确保线程安全）"""
+        # 使用信号确保在主线程中更新UI
+        if cookie_count is not None or device_count is not None:
+            # 如果只传了一个参数，需要获取当前值
+            current_cookie = int(self.cookie_count_label.text()) if cookie_count is None else cookie_count
+            current_device = int(self.device_count_label.text()) if device_count is None else device_count
+            
+            if cookie_count is None:
+                cookie_count = current_cookie
+            if device_count is None:
+                device_count = current_device
+            
+            # 通过信号更新（确保线程安全）
+            if hasattr(self, 'update_count_signal'):
+                self.update_count_signal.emit(cookie_count, device_count)
+            else:
+                # 如果没有信号，直接更新（如果已经在主线程中）
+                self.cookie_count_label.setText(str(cookie_count))
+                self.device_count_label.setText(str(device_count))
 
 
 class ConfigPage(QWidget):
@@ -1819,90 +1810,102 @@ class ConfigPage(QWidget):
             parent=self
         )
         
-        # 异步执行，分批拉取
+        # 异步执行，只拉取1个Cookie
         def fetch_async():
             import time
             import traceback
             start_time = time.time()
-            all_cookies = []
-            batch_size = 500  # 每批500个Cookie
             
             try:
                 logger.info(f"[拉取Cookie] 开始拉取Cookie，API地址: {self.parent_window.api_url}")
                 api_url = self.parent_window.api_url.rstrip('/')
                 url = f"{api_url}/api/allocate_resources"
                 
-                batch_num = 0
-                cookie_offset = 0
+                # 更新进度提示
+                progress_text = "正在拉取Cookie（1个）..."
+                try:
+                    if self._progress_bar:
+                        self._progress_bar.setContent(progress_text)
+                except:
+                    pass
                 
-                while True:
-                    batch_num += 1
-                    logger.debug(f"[拉取Cookie] 拉取第 {batch_num} 批，offset={cookie_offset}")
-                    
-                    # 更新进度提示（通过实例变量访问）
-                    progress_text = f"正在拉取第 {batch_num} 批Cookie（每批{batch_size}个）..."
-                    try:
-                        if self._progress_bar:
-                            self._progress_bar.setContent(progress_text)
-                    except:
-                        pass
-                    
-                    # 分批拉取
-                    data = {
-                        'client_key': self.parent_window.client_key,
-                        'cookie_count': batch_size,  # 每次500个
-                        'device_count': -1,  # 不拉取设备
-                        'cookie_offset': cookie_offset,
-                        'include_cooldown': True  # 包含冷却期的 Cookie（用于完整显示）
-                    }
-                    
-                    logger.debug(f"[拉取Cookie] 发送请求: {data}")
-                    response = requests.post(url, json=data, timeout=30)
-                    response.raise_for_status()
-                    result = response.json()
-                    logger.debug(f"[拉取Cookie] 收到响应: success={result.get('success')}, cookies数量={len(result.get('data', {}).get('cookies', []))}")
-                    
-                    if not result.get('success'):
-                        msg = result.get('message', '未知错误')
-                        logger.error(f"[拉取Cookie] 请求失败: {msg}")
-                        self.cookie_fetch_error.emit(f"拉取失败: {msg}")
-                        return
-                    
-                    cookies_data = result.get('data', {}).get('cookies', [])
-                    if not cookies_data:
-                        logger.debug(f"[拉取Cookie] 没有更多Cookie了")
-                        # 没有更多数据了
-                        break
-                    
-                    # 添加到总列表（保留完整数据，包括 ID 和 UID）
-                    all_cookies.extend(cookies_data)
-                    logger.debug(f"[拉取Cookie] 已累计拉取 {len(all_cookies)} 个Cookie")
-                    
-                    # 如果返回数量小于batch_size，说明已经是最后一批
-                    if len(cookies_data) < batch_size:
-                        logger.debug(f"[拉取Cookie] 最后一批，返回了 {len(cookies_data)} 个")
-                        break
-                    
-                    # 更新偏移量
-                    cookie_offset += batch_size
+                # 只拉取1个Cookie
+                data = {
+                    'client_key': self.parent_window.client_key,
+                    'cookie_count': 1,  # 每次只拉取1个
+                    'device_count': -1,  # 不拉取设备
+                    'cookie_offset': 0,
+                    'include_cooldown': False  # 不包含冷却期的 Cookie（只拉取可用的）
+                }
+                
+                logger.debug(f"[拉取Cookie] 发送请求: {data}")
+                response = requests.post(url, json=data, timeout=30)
+                response.raise_for_status()
+                result = response.json()
+                logger.debug(f"[拉取Cookie] 收到响应: success={result.get('success')}, cookies数量={len(result.get('data', {}).get('cookies', []))}")
+                
+                if not result.get('success'):
+                    msg = result.get('message', '未知错误')
+                    logger.error(f"[拉取Cookie] 请求失败: {msg}")
+                    self.cookie_fetch_error.emit(f"拉取失败: {msg}")
+                    return
+                
+                cookies_data = result.get('data', {}).get('cookies', [])
                 
                 # 拉取完成
-                logger.info(f"[拉取Cookie] 拉取完成，总共 {len(all_cookies)} 个Cookie")
+                logger.info(f"[拉取Cookie] 拉取完成，共 {len(cookies_data)} 个Cookie")
                 
                 elapsed = time.time() - start_time
                 
-                if all_cookies:
+                if cookies_data:
+                    # 提取 Cookie ID 列表（用于标记使用）
+                    cookie_ids_to_mark = []
+                    for item in cookies_data:
+                        cookie_id = item.get('id')
+                        if cookie_id:
+                            cookie_ids_to_mark.append(cookie_id)
+                    
+                    # ===== 立即标记为已使用（设置冷却期12小时）=====
+                    if cookie_ids_to_mark:
+                        try:
+                            mark_response = requests.post(
+                                f"{api_url}/api/mark_resources_used",
+                                json={
+                                    'client_key': self.parent_window.client_key,
+                                    'cookie_ids': cookie_ids_to_mark,
+                                    'device_ids': [],
+                                    'cooldown_hours': 12
+                                },
+                                timeout=10
+                            )
+                            mark_response.raise_for_status()
+                            mark_result = mark_response.json()
+                            if mark_result.get('success'):
+                                marked_count = mark_result.get('data', {}).get('marked_cookies', 0)
+                                logger.info(f"[拉取Cookie] ✅ 已标记 {marked_count} 个Cookie为已使用，12小时内不会再次拉取")
+                            else:
+                                logger.warning(f"[拉取Cookie] ⚠️ 标记使用失败: {mark_result.get('message')}")
+                        except Exception as e:
+                            logger.error(f"[拉取Cookie] ⚠️ 标记使用出错: {str(e)}")
+                    
                     # 保存到配置（同时保存 Cookie ID 映射）
                     logger.debug(f"[拉取Cookie] 保存到配置...")
                     
                     # 提取 Cookie 字符串和建立 ID 映射
-                    cookies_str = [item['cookie'] for item in all_cookies]
+                    cookies_str = [item['cookie'] for item in cookies_data]
+                    
+                    # 合并到现有 Cookie 列表（去重）
+                    existing_cookies = self.parent_window.cookies or []
+                    merged = existing_cookies + cookies_str
+                    deduped = self._deduplicate_cookies_by_uid(merged)
+                    replaced = len(merged) - len(deduped)
+                    
                     if not hasattr(self.parent_window, 'cookie_ids'):
                         self.parent_window.cookie_ids = {}
                     
                     # 建立 Cookie UID 到 Cookie ID 的映射
                     cookie_id_count = 0
-                    for item in all_cookies:
+                    for item in cookies_data:
                         try:
                             cookie_id = item.get('id')
                             cookie_uid = item.get('uid')
@@ -1915,17 +1918,21 @@ class ConfigPage(QWidget):
                     if cookie_id_count > 0:
                         logger.info(f"[拉取Cookie] ✅ 已建立 {cookie_id_count} 个Cookie的ID映射（用于标记封禁）")
                     
-                    # 保存 Cookie 列表（只保存字符串）
-                    self.parent_window.cookies = cookies_str
+                    # 保存 Cookie 列表（去重后的）
+                    self.parent_window.cookies = deduped
                     self.parent_window.save_config()
                     
                     # 发射成功信号（会在主线程中处理UI更新）
                     count = len(cookies_str)
                     logger.debug(f"[拉取Cookie] 发射成功信号：count={count}, elapsed={elapsed}")
-                    self.cookie_fetch_success.emit(count, elapsed)
+                    if replaced > 0:
+                        self.cookie_fetch_success.emit(count, elapsed)
+                        logger.info(f"[拉取Cookie] 已去重：新增 {count} 条，覆盖 {replaced} 条重复")
+                    else:
+                        self.cookie_fetch_success.emit(count, elapsed)
                 else:
                     logger.warning(f"[拉取Cookie] 没有可用的Cookie")
-                    self.cookie_fetch_error.emit("服务器上没有可用的Cookie")
+                    self.cookie_fetch_error.emit("服务器上没有可用的Cookie（可能都在冷却期或已锁定）")
                     
             except requests.Timeout as e:
                 logger.error(f"[拉取Cookie] 请求超时: {e}")
@@ -2001,95 +2008,96 @@ class ConfigPage(QWidget):
             parent=self
         )
         
-        # 异步执行，分批拉取
+        # 异步执行，只拉取200个设备
         def fetch_async():
             import time
             import traceback
             start_time = time.time()
-            all_devices = []
-            batch_size = 1000  # 每批1000个
             
             try:
                 logger.info(f"[拉取设备] 开始拉取设备，API地址: {self.parent_window.api_url}")
                 api_url = self.parent_window.api_url.rstrip('/')
                 url = f"{api_url}/api/allocate_resources"
                 
-                batch_num = 0
-                device_offset = 0  # 初始化偏移量
+                # 更新进度提示
+                progress_text = "正在拉取设备（200个）..."
+                self.progress_update.emit(progress_text)
                 
-                while True:
-                    batch_num += 1
-                    logger.debug(f"[拉取设备] 拉取第 {batch_num} 批，offset={device_offset}")
-                    
-                    # 拉取前显示进度（使用信号确保在主线程更新）
-                    if batch_num == 1:
-                        progress_text = f"正在拉取第 1 批设备..."
-                    else:
-                        current_count = len(all_devices)
-                        elapsed = time.time() - start_time
-                        progress_text = f"已拉取 {current_count} 个设备 | 第 {batch_num} 批 | 耗时 {elapsed:.1f}秒"
-                    
-                    # 发射进度更新信号
-                    self.progress_update.emit(progress_text)
-                    
-                    # 构建请求数据（包含偏移量）
-                    data = {
-                        'client_key': self.parent_window.client_key,
-                        'cookie_count': -1,  # -1=不拉取Cookie
-                        'device_count': batch_size,  # 每次1000个
-                        'device_offset': device_offset  # 添加偏移量
-                    }
-                    
-                    logger.debug(f"[拉取设备] 发送请求: {data}")
-                    response = requests.post(url, json=data, timeout=30)
-                    response.raise_for_status()
-                    result = response.json()
-                    logger.debug(f"[拉取设备] 收到响应: success={result.get('success')}, devices数量={len(result.get('data', {}).get('devices', []))}")
-                    
-                    if not result.get('success'):
-                        msg = result.get('message', '未知错误')
-                        logger.error(f"[拉取设备] 请求失败: {msg}")
-                        self.device_fetch_error.emit(f"拉取失败: {msg}")
-                        return
-                    
-                    devices_data = result.get('data', {}).get('devices', [])
-                    if not devices_data:
-                        logger.debug(f"[拉取设备] 没有更多设备了")
-                        # 没有更多数据了
-                        break
-                    
-                    # 添加到总列表
-                    all_devices.extend(devices_data)
-                    logger.debug(f"[拉取设备] 已累计拉取 {len(all_devices)} 个设备")
-                    
-                    # 拉取后更新进度，显示最新数量（使用信号）
-                    current_count = len(all_devices)
-                    elapsed = time.time() - start_time
-                    progress_text_after = f"✓ 已拉取 {current_count} 个设备 | 耗时 {elapsed:.1f}秒"
-                    
-                    # 发射进度更新信号
-                    self.progress_update.emit(progress_text_after)
-                    
-                    # 如果返回数量小于batch_size，说明已经是最后一批
-                    if len(devices_data) < batch_size:
-                        logger.debug(f"[拉取设备] 最后一批，返回了 {len(devices_data)} 个")
-                        break
-                    
-                    # 更新偏移量，准备拉取下一批
-                    device_offset += batch_size
+                # 构建请求数据（只拉取200个）
+                data = {
+                    'client_key': self.parent_window.client_key,
+                    'cookie_count': -1,  # -1=不拉取Cookie
+                    'device_count': 200,  # 每次固定拉取200个
+                    'device_offset': 0
+                }
+                
+                logger.debug(f"[拉取设备] 发送请求: {data}")
+                response = requests.post(url, json=data, timeout=30)
+                response.raise_for_status()
+                result = response.json()
+                logger.debug(f"[拉取设备] 收到响应: success={result.get('success')}, devices数量={len(result.get('data', {}).get('devices', []))}")
+                
+                if not result.get('success'):
+                    msg = result.get('message', '未知错误')
+                    logger.error(f"[拉取设备] 请求失败: {msg}")
+                    self.device_fetch_error.emit(f"拉取失败: {msg}")
+                    return
+                
+                devices_data = result.get('data', {}).get('devices', [])
                 
                 # 拉取完成
-                logger.info(f"[拉取设备] 拉取完成，总共 {len(all_devices)} 个设备")
+                logger.info(f"[拉取设备] 拉取完成，共 {len(devices_data)} 个设备")
                 elapsed = time.time() - start_time
                 
-                if all_devices:
+                if devices_data:
+                    # 提取设备 ID 列表（用于标记使用）
+                    device_ids_to_mark = []
+                    for item in devices_data:
+                        device_id = item.get('id')
+                        if device_id:
+                            device_ids_to_mark.append(device_id)
+                    
+                    # ===== 立即标记为已使用（设置冷却期12小时）=====
+                    if device_ids_to_mark:
+                        try:
+                            mark_response = requests.post(
+                                f"{api_url}/api/mark_resources_used",
+                                json={
+                                    'client_key': self.parent_window.client_key,
+                                    'cookie_ids': [],
+                                    'device_ids': device_ids_to_mark,
+                                    'cooldown_hours': 12
+                                },
+                                timeout=10
+                            )
+                            mark_response.raise_for_status()
+                            mark_result = mark_response.json()
+                            if mark_result.get('success'):
+                                marked_count = mark_result.get('data', {}).get('marked_devices', 0)
+                                logger.info(f"[拉取设备] ✅ 已标记 {marked_count} 个设备为已使用，12小时内不会再次拉取")
+                            else:
+                                logger.warning(f"[拉取设备] ⚠️ 标记使用失败: {mark_result.get('message')}")
+                        except Exception as e:
+                            logger.error(f"[拉取设备] ⚠️ 标记使用出错: {str(e)}")
+                    
                     # 提取设备字符串
-                    devices = [item['device_string'] for item in all_devices]
-                    device_ids = [item['id'] for item in all_devices]
+                    devices = [item['device_string'] for item in devices_data]
+                    device_ids = [item['id'] for item in devices_data]
+                    
+                    # 合并到现有设备列表（去重）
+                    existing_devices = self.parent_window.devices or []
+                    merged_devices = existing_devices + devices
+                    # 设备去重（按设备字符串）
+                    seen_devices = set()
+                    deduped_devices = []
+                    for dev in merged_devices:
+                        if dev not in seen_devices:
+                            seen_devices.add(dev)
+                            deduped_devices.append(dev)
                     
                     # 保存到配置
                     logger.info(f"[拉取设备] 保存设备到配置...")
-                    self.parent_window.devices = devices
+                    self.parent_window.devices = deduped_devices
                     if not hasattr(self.parent_window, 'device_ids'):
                         self.parent_window.device_ids = {}
                     
@@ -2110,7 +2118,8 @@ class ConfigPage(QWidget):
                     
                     # 发射成功信号
                     count = len(devices)
-                    logger.debug(f"[拉取设备] 发射成功信号：count={count}, elapsed={elapsed}")
+                    added_count = len(deduped_devices) - len(existing_devices)
+                    logger.debug(f"[拉取设备] 发射成功信号：count={count}, elapsed={elapsed}, 新增={added_count}")
                     self.device_fetch_success.emit(count, elapsed)
                 else:
                     logger.warning(f"[拉取设备] 没有可用的设备")
@@ -2156,9 +2165,49 @@ class ConfigPage(QWidget):
         
         self.cookie_preview.setText(preview_text)
         
-        # 更新主页面显示
-        self.parent_window.main_page.update_data_display()
-        # 刷新主页面 Cookie 下拉
+        # ===== 拉取后过滤并更新主页面显示的可用数量 =====
+        if hasattr(self.parent_window, 'main_page'):
+            try:
+                # 过滤可用的Cookie
+                cookies = self.parent_window.cookies or []
+                raw_users = []
+                for c in cookies:
+                    c2 = tools.replace_cookie_item(c, "sgcookie", None)
+                    u = User(c2)
+                    if u:
+                        if not u.uid:
+                            if u.sid:
+                                u.uid = u.sid
+                            else:
+                                cookie2 = tools.get_cookie_item_value(c2, "cookie2")
+                                if cookie2:
+                                    u.uid = cookie2
+                                else:
+                                    u.uid = c[:20] if c else "__no_id__"
+                        raw_users.append((c, u))
+                
+                # 去重
+                seen_uids = set()
+                dedup_users = []
+                for c, u in reversed(raw_users):
+                    if u.uid not in seen_uids:
+                        seen_uids.add(u.uid)
+                        dedup_users.append((c, u))
+                
+                # 过滤12小时内使用过的Cookie
+                users = [u for _, u in dedup_users]
+                available_users = filter_available(users=users, isaccount=True, interval_hours=12)
+                available_cookie_count = len(available_users)
+                
+                # 更新主页面显示过滤后的数量
+                self.parent_window.main_page.cookie_count_label.setText(str(available_cookie_count))
+                logger.info(f"[拉取后过滤] Cookie过滤后：可用 {available_cookie_count} 个")
+            except Exception as e:
+                logger.error(f"[拉取后过滤] Cookie过滤失败: {str(e)}", exc_info=True)
+                # 如果过滤失败，显示总数
+                self.parent_window.main_page.update_data_display()
+        
+        # 刷新主页面 Cookie 下拉（只显示可用的）
         if hasattr(self.parent_window, 'main_page'):
             self.parent_window.main_page.refresh_cookie_select()
     
@@ -2186,8 +2235,32 @@ class ConfigPage(QWidget):
         
         self.device_preview.setText(preview_text)
         
-        # 更新主页面显示
-        self.parent_window.main_page.update_data_display()
+        # ===== 拉取后过滤并更新主页面显示的可用数量 =====
+        if hasattr(self.parent_window, 'main_page'):
+            try:
+                # 过滤可用的设备
+                devices = self.parent_window.devices or []
+                from model.device import Device
+                device_objs = []
+                for device_str in devices:
+                    items = [item.strip() for item in device_str.split("\t") if item.strip()]
+                    if len(items) >= 5:
+                        device_obj = Device(items[0], items[1], items[2], items[3], items[4])
+                        device_objs.append(device_obj)
+                
+                # 过滤设备
+                from database import filter_unused_devices
+                available_devices_step1 = filter_available(devices=device_objs, isaccount=False, interval_hours=10)
+                available_devices = filter_unused_devices(available_devices_step1, interval_minutes=720)
+                available_device_count = len(available_devices)
+                
+                # 更新主页面显示过滤后的数量
+                self.parent_window.main_page.device_count_label.setText(str(available_device_count))
+                logger.info(f"[拉取后过滤] 设备过滤后：可用 {available_device_count} 个")
+            except Exception as e:
+                logger.error(f"[拉取后过滤] 设备过滤失败: {str(e)}", exc_info=True)
+                # 如果过滤失败，显示总数
+                self.parent_window.main_page.update_data_display()
     
     def show_success(self, message):
         """显示成功提示"""
