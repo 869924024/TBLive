@@ -1697,9 +1697,9 @@ class ConfigPage(QWidget):
         button_layout = QHBoxLayout()
         
         # 从文件导入
-        import_btn = PushButton(FIF.FOLDER, "从文件导入")
-        import_btn.clicked.connect(self.import_device_from_file)
-        button_layout.addWidget(import_btn)
+        # import_btn = PushButton(FIF.FOLDER, "从文件导入")
+        # import_btn.clicked.connect(self.import_device_from_file)
+        # button_layout.addWidget(import_btn)
         
         # 远程拉取（主要方式）
         fetch_btn = PrimaryPushButton(FIF.CLOUD_DOWNLOAD, "远程拉取")
