@@ -1298,21 +1298,64 @@ class MainPage(QWidget):
         # 在后台线程标记 robot Cookie（不影响UI响应）
         threading.Thread(target=mark_robot_cookies, daemon=True).start()
 
-        # ===== 任务结束后：释放资源（仅服务器模式）=====
+        # ===== 任务结束后：禁用设备并释放锁（仅服务器模式）=====
         def release_resources_async():
+            """
+            任务结束后的资源处理：
+            1) 先将本次使用的设备直接标记为禁用（status=2），确保后续不再使用。
+            2) 再释放锁定（服务器侧 is_locked=0），避免设备永久锁定。
+            说明：释放时的冷却期参数对已禁用设备无影响，仅用于保持锁记录一致。
+            """
             # 只有服务器模式才需要释放资源
             if hasattr(self, 'using_server_mode') and self.using_server_mode:
-                # 即使任务失败，也要释放资源（只要有锁定的资源）
+                # 即使任务失败，也要处理资源（只要有锁定的资源）
                 task_cookie_ids = getattr(self, 'task_cookie_ids', [])
                 task_device_ids = getattr(self, 'task_device_ids', [])
-                
+
                 if task_cookie_ids or task_device_ids:
+                    api_url = self.parent_window.api_url.rstrip('/')
+                    client_key = self.parent_window.client_key
+
+                    # ===== 1. 批量封禁设备（status=2）=====
+                    banned_count = 0
+                    if task_device_ids:
+                        for dev_id in task_device_ids:
+                            try:
+                                # 调用服务器接口禁用设备
+                                resp = requests.post(
+                                    f"{api_url}/api/update_device_status",
+                                    json={
+                                        'client_key': client_key,
+                                        'device_id': dev_id,
+                                        'status': 2  # 2=封禁
+                                    },
+                                    timeout=10
+                                )
+                                resp.raise_for_status()
+                                result = resp.json()
+                                if result.get('success'):
+                                    banned_count += 1
+                                else:
+                                    logger.warning(f"[禁用] 设备 {dev_id} 禁用失败: {result.get('message')}")
+                            except Exception as e:
+                                # 网络异常或其他错误不影响整体流程，记录日志即可
+                                logger.error(f"[禁用] 设备 {dev_id} 禁用出错: {str(e)}")
+
+                    if banned_count > 0:
+                        # 中文提示：明确封禁数量
+                        self.log(f"🛑 已封禁 {banned_count} 个设备（后续不再使用）")
+                        logger.info(f"[禁用] 已封禁设备数量: {banned_count}")
+                    else:
+                        if task_device_ids:
+                            self.log("⚠️ 未能禁用任何设备，请检查服务器接口或网络")
+                            logger.warning("[禁用] 未能禁用设备")
+
+                    # ===== 2. 释放锁定（冷却对已禁用设备无影响）=====
                     try:
-                        api_url = self.parent_window.api_url.rstrip('/')
                         response = requests.post(
                             f"{api_url}/api/release_resources",
                             json={
-                                'client_key': self.parent_window.client_key,
+                                'client_key': client_key,
                                 'cookie_ids': task_cookie_ids,
                                 'device_ids': task_device_ids,
                                 'cooldown_hours': 12
@@ -1320,18 +1363,21 @@ class MainPage(QWidget):
                             timeout=15
                         )
                         response.raise_for_status()
-                        result = response.json()
-                        
-                        if result.get('success'):
-                            self.log(f"✅ {result.get('message')}")
-                            logger.info(f"[释放] 释放成功: {result.get('message')}")
+                        r = response.json()
+                        if r.get('success'):
+                            # 释放锁成功（设备已禁用，锁释放仅用于清理）
+                            self.log("🔓 设备锁已释放（已禁用设备不再参与分配）")
+                            logger.info("[释放] 锁释放成功")
                         else:
-                            self.log(f"⚠️ 释放资源失败: {result.get('message')}")
-                            logger.error(f"[释放] 释放失败: {result.get('message')}")
-                            
+                            err = r.get('message', '未知错误')
+                            self.log(f"⚠️ 释放资源失败: {err}")
+                            logger.warning(f"[释放] 释放失败: {err}")
+                    except requests.exceptions.RequestException as e:
+                        self.log(f"⚠️ 释放资源网络错误: {str(e)}")
+                        logger.error(f"[释放] 网络错误: {str(e)}", exc_info=True)
                     except Exception as e:
                         self.log(f"⚠️ 释放资源时出错: {str(e)}")
-                        logger.error(f"[释放] 释放时出错: {str(e)}", exc_info=True)
+                        logger.error(f"[释放] 异常: {str(e)}", exc_info=True)
                 else:
                     # 没有锁定的资源，可能都是本地导入的或预热失败
                     logger.info(f"[释放] 没有需要释放的资源（可能都是本地导入的或预热失败）")
