@@ -66,7 +66,7 @@ def save_timestamp(_id):
             raise e
 
 
-def filter_available(users=[User], devices=[Device], isaccount=False, interval_hours=10):
+def filter_available(users=[User], devices=[Device], isaccount=False, interval_hours=12):
     """过滤出可执行的账户（排除被封禁的 Cookie）"""
     cache = load_cache()
     current_time = time.time()

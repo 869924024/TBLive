@@ -81,13 +81,9 @@ def build_subscribe_data(user: User, device: Device, account_id: str, live_id: s
     Returns:
         tuple: (data_str, seconds) - JSON字符串和时间戳
     """
-    # 统一获取时间戳
+    """订阅直播消息"""
     now_seconds = int(time.time())  # 秒级时间戳（用于签名）
     now_ms = now_seconds * 1000  # 毫秒时间戳（用于构造数据）
-    
-    # 添加小的随机偏移（-200ms到+200ms），避免批量请求时间戳完全相同
-    random_offset = random.randint(-200, 200)
-    now_ms = now_ms + random_offset
 
     pm_session = f"{now_ms}{tools.get_random_string()}"
     live_token = f"{now_ms}_{live_id}_{tools.get_random_string(4, True)}"
@@ -100,8 +96,8 @@ def build_subscribe_data(user: User, device: Device, account_id: str, live_id: s
     ext = {
         "ignorePv": "0",
         "liveClientParams": {
-            "livesource": "homepage.changjinglu.zhusou",
-            "entryLiveSource": "homepage.changjinglu.zhusou",
+            "livesource": "PlayBackToLive",
+            "entryLiveSource": "PlayBackToLive",
             "liveToken": live_token,
             "spm-cnt": "a2141.8001249",
             "isAD": "0",
@@ -118,8 +114,7 @@ def build_subscribe_data(user: User, device: Device, account_id: str, live_id: s
         "needEventWhenIgnorePv": "true"
     }
 
-    # 构造完整的请求数据
-    json_data = {
+    json_data={
         "appKey": "21646297",
         "ext": json.dumps(ext, ensure_ascii=False),
         "from": user.nickname,
@@ -127,12 +122,10 @@ def build_subscribe_data(user: User, device: Device, account_id: str, live_id: s
         "internalExt": "",
         "namespace": 1,
         "role": 3,
-        "sdkVersion": "0.2.4",
+        "sdkVersion": "0.3.0",
         "tag": "",
         "topic": topic,
-        "utdId": device.utdid,
-        "xxx_api_name": "mtop.taobao.powermsg.msg.subscribe",
-        "xxx_api_version": "1.0",
+        "utdId": device.utdid
     }
     
     data_str = json.dumps(json_data, ensure_ascii=False)
@@ -140,7 +133,6 @@ def build_subscribe_data(user: User, device: Device, account_id: str, live_id: s
     if not hasattr(build_subscribe_data, "_debug_printed"):
         print(f"[DEBUG] build_subscribe_data 输出示例:")
         print(f"  data_str 长度: {len(data_str)}")
-        print(f"  seconds: {str(now_seconds)} (秒级)")
         print(f"  now_ms: {now_ms} (毫秒级)")
         print(f"  data_str 前200字符: {data_str}")
         build_subscribe_data._debug_printed = True
@@ -195,7 +187,7 @@ def get_sign(device: Device, user: User, api, v, data, t):
 
     # 不重试，直接请求
     try:
-        resp = requests.post("http://192.168.31.130:9001/api/taobao/sign",
+        resp = requests.post("http://localhost:9001/api/taobao/sign",
                              headers={"content-type": "application/json"},
                              json=json_data,
                              timeout=3)
@@ -239,11 +231,11 @@ def call_app_api(
         
         # 获取用户的随机User-Agent（每个用户固定，降低关联性但不影响签名）
         user_agent = get_random_user_agent(user.uid, use_cache=True)
-        
-        # 请求头（只随机化UA，其他参数固定以保证签名正确）
+
+        # 请求头
         headers = {
             "Accept-Encoding": "gzip",
-            "user-agent": user_agent,  # 随机化：不同手机型号（不影响签名）
+            "user-agent": "MTOPSDK%2F3.1.1.7+%28Android%3B10%3BXiaomi%3BMIX+2S%29+DeviceType%28Phone%29",
             "x-app-ver": "10.51.0",
             "x-appkey": "21646297",
             "x-devid": urllib.parse.quote(device.devid),
@@ -393,10 +385,11 @@ async def call_app_api_prepared_async_with_client(
     """异步版本：使用共享的 httpx.AsyncClient（性能优化版本）"""
     # 获取用户的随机User-Agent（每个用户固定）
     user_agent = get_random_user_agent(user.uid, use_cache=True)
-    
+
+    # 请求头
     headers = {
         "Accept-Encoding": "gzip",
-        "user-agent": user_agent,  # 随机化：不同手机型号（不影响签名）
+        "user-agent": "MTOPSDK%2F3.1.1.7+%28Android%3B10%3BXiaomi%3BMIX+2S%29+DeviceType%28Phone%29",
         "x-app-ver": "10.51.0",
         "x-appkey": "21646297",
         "x-devid": urllib.parse.quote(device.devid),

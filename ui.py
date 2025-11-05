@@ -858,11 +858,11 @@ class AccountPage(QWidget):
                 self.available_device_label.setText("可用设备数: 0")
                 return
             
-            # 第1步：过滤10小时内被封禁的设备
-            available_devices = filter_available(devices=devices, isaccount=False, interval_hours=10)
+            # 第1步：过滤12小时内被封禁的设备
+            available_devices = filter_available(devices=devices, isaccount=False, interval_hours=12)
             
-            # 第2步：过滤10分钟内已使用的设备
-            available_devices = filter_unused_devices(available_devices, interval_minutes=10)
+            # 第2步：过滤720分钟内已使用的设备
+            available_devices = filter_unused_devices(available_devices, interval_minutes=720)
             
             available_count = len(available_devices)
             total_count = len(devices)
